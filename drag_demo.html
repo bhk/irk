@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang=en>
+  <head>
+    <meta charset=utf-8>
+    <style>
+      body {
+          background-color: #eee;
+          font: 16px Arial;
+      }
+
+      .box.state1 { background-color: #ee8; }    /* being dragged */
+      .box.moved { border-color: blue; }         /* has moved since "start" */
+      .box.error { background-color: #f00; }     /* invalid state */
+
+      .box {
+          touch-action: none;
+          position: absolute;
+          box-sizing: border;
+          width: 50px;
+          height: 50px;
+          border: 5px solid black;
+          border-radius: 5px;  /* too twee? */
+          user-select: none;
+          text-align: center;
+          padding: 3px;
+          -webkit-user-select: none;
+          background-color: #ddd;
+      }
+
+    </style>
+  </head>
+  <body>
+
+    <p>Drag boxes to test. Box background & border colors reflect drag
+      states.
+    <p>Yellow background => being dragged.
+      <br>Blue border => has moved since start of drag operation.
+      <br>Red background => invalid state.
+
+    <div class=box style="left: 100px; top: 150px;">Drag me</div>
+    <div class=box style="left: 200px; top: 150px;">Drag me</div>
+
+
+<script type=module>
+  import {handleDrag, listen} from "./drag.js";
+
+  let toNum = (str) => Number(str.match(/[0-9\.]*/)[0]);
+  let pxAdd = (px, n) => (toNum(px) + n) + 'px';
+
+  [...document.getElementsByClassName("box")].map( e => {
+      let style = e.style;
+
+      let state = 0;
+
+      // For every "start" there should be exactly one "stop".
+      //
+      let checkAndSetState = (expected, newState) => {
+          let old = state;
+          state = newState;
+          if (old != expected) {
+              e.className = "box error";
+              console.log("state = " + state + ", expected " + expected);
+          } else {
+              e.className = "box state" + state;
+          }
+      };
+
+      let dragX = 0;
+      let dragY = 0;
+      let setDrag = (dx, dy) => {
+          dragX = dx;
+          dragY = dy;
+          style.transform = "translate(" + dx + "px, " + dy + "px)"
+      };
+
+      let dragTarget = {
+          dragStart: () => {
+              checkAndSetState(0, 1);
+              dragX = dragY = 0;
+          },
+
+          dragStop: (isDrop) => {
+              style.transform = "";
+              checkAndSetState(1, 0);
+              if (isDrop) {
+                  style.left = pxAdd(style.left, dragX);
+                  style.top = pxAdd(style.top, dragY);
+              }
+          },
+
+          dragMove: (dx, dy, event) => {
+              e.classList.add("moved");
+              setDrag(dx, dy);
+          },
+      };
+
+      handleDrag(e, dragTarget);
+  });
+
+</script>
+
+  </body>
+</html>

@@ -1,0 +1,8 @@
+{
+    "type": "module",
+    "name": "irk",
+    "devDependencies": {
+        "rollup": "^2.36.2",
+        "rollup-plugin-terser": "^7.0.2"
+    }
+}

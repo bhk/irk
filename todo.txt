@@ -1,0 +1,45 @@
+Current
+=======
+
+ + Makefile: Run unit tests
+ + Bundle w/ implied deps & stripping tests (using remapping)
+ - generate implied dependencies of tests
+ - Makefile: open demo JS as web page
+
+    1. Use `if (FALSE) ...` toggled by `--define`.  Problem: minification
+       happens after bundling.  Bundling pulls in external modules that are
+       never used.
+
+
+     * `terser INFILE --define TEST=false`
+         -> elides `if (TEST) { ... }`
+         -> does not elide `if (glogalThis.TEST) { ... }`
+     * `if (TEST) { ... }` generates run-time error when not elided
+     * `globalThis.TEST=true` avoids the run-time error
+
+ - i.js:
+
+   * Describe `memo`
+   * defer(f, ...args)
+        defer(_ => f(a,b))  <-->   defer(f, a, b)
+   * Remove deferMemo
+        deferMemo(f)(a,b)    -->   defer(memo(f), a,b)
+
+   * Document "monitoring": "during execution of a cell, its accesses of
+     other cells (inputs, intermediates) are logged."
+
+
+Notes
+=====
+
+ * `$ npm update` installs dependencies.
+
+ * Javascript sources are ES "modules", and should be directly usable,
+   as-is, by a browser or Node.js.  This implies:
+
+   - Imports must use relative paths beginning with "./" or "../".
+     (Browsers require this -- or "/", which would mean different things in
+     different contexts.)
+
+   - We add `"type":"module"` to package.json so Node will recognize them
+     as such.

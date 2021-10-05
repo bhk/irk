@@ -1,0 +1,292 @@
+Incremental.js
+####
+
+    Objective: Create a system that enables construction of UIs and other
+    programs as a function of external state at any point in time.  The
+    system deals with changes in external state efficiently, so that the
+    entire program does not need to be re-evaluated on every change.  This
+    frees the programmer from the need to write code for change propagation
+    (cf. usage of the "listener" model in UIs: modification of data
+    structures consistent with initial construction, registration for
+    notifications, and de-registration).  It also enables a more intuitive
+    way of dealing with I/O in a pure functional language.
+
+    Related/involved concepts: build systems, memoization, reactive
+    programming, incremental algorithms.
+
+
+Concept Outline
+===============
+
+  - A functional description, re-evaluated over time, is an alternative to
+    the "listener" model common in UI code, and more generally to various
+    programming paradigms involving registration, deregistration, and
+    customer handlers for different kinds of run-time state changes.  When
+    we refer to *time-changing* values or inputs, we mean values that differ
+    from one evaluation to the next; we assume they do not change during a
+    single evaluation.
+
+  - Input Logging: During execution of our program, a "runtime" (library or
+    VM) can monitor accesses to time-changing values, for two purposes.  (1)
+    The runtime can log the input operations and the values they returned.
+    Prior to re-evaluation, it can re-examine the time-changing values and
+    compare them to their values in the previous cycle.  If they have not
+    changed, the re-evaluation can be skipped.  (2) The runtime can register
+    for notification of changes to the accessed variables, so that it can
+    know when the program needs to be re-evaluated.
+
+  - Compartmentalization: We can separate our program into different
+    independently re-computable "processing nodes", similar to how a build
+    system breaks a build operation into distinct rules.  Input logging is
+    per-node, and dependencies between nodes are entailed in function
+    arguments and return values.
+
+  - Memoization: With a pure function, the same arguments always produce the
+    same result.  For these functions, we can cache the results and
+    short-cirtuit re-evaluation.
+
+    When a function is not pure, (it accesses time-changing values) it is
+    still pure within the context of a single evaluation, so memoization
+    remains valid for the scope of a single evaluation.  Furthermore, with
+    input logging, we can determine whether the cached result remains valid
+    in a subsequent cycle.
+
+  - Liveness:  We need to cancel registrations for changes when, after
+    recalculation, the values in question are no longer being accessed by
+    the program.  A dependency is "live" when it is being accessed by the
+    most recent evaluation.
+
+  - Non-blocking input: The notion of time-changing state can be applied to
+    long-lived IO operations, allowing an incremental program to deal with
+    I/O very easily.
+
+  - Conduits: We can generalize I/O as *conduits*: objects that encapsulate
+    state.  The conduit may remain unchanging while the value within it
+    changes.  Retrieval of the value inside a conduit is logged as a
+    dependency.
+
+  - External code: Code that is not executed during our functional
+    description is called external code.  This code may be invoked as
+    listeners or as callbacks.  Only "external" code may modify state.
+    One goal I have in mind is minimizing or eliminating "external" code.
+
+
+Notes
+====
+
+
+### Summary
+
+   [Using new terminology]
+      * Memoization calls introduce cell boundaries.
+         - If the result does not change, re-eval doesn't propagate up.
+         - If the inputs don't change, re-eval doesn't propagate down.
+      * Invalidation identifies cells that may have changed.
+      * Input logging identifies when inputs *have* change.
+
+
+    Invalidation limits re-evaluation to when it is required.  Input logging
+    limits re-evaluation to the set of inputs that matter.  Memoization and
+    compartmentalization limit re-evaluation to sub-regions of the data-flow
+    graph: compartmentalization stops re-evaluation propagating downstream;
+    memoization stops it from propagating upstream.
+
+
+### Memoization
+
+
+    Our JavaScript library uses strict equality when comparing functions and
+    function arguments.  As a result, developers must take care not to
+    "sneak" values across node boundaries, or else results will fail to be
+    consistent with that of a full re-evaluation.  This can happen in two
+    ways:
+
+    1. Captured variables (or globals).
+    2. Values contained within aggregates (arrays, objects, etc.).
+
+    For example:
+
+    . BAD:   function parent() {
+    .           let localVar = 1;
+    .           memo(() => { localVar = state.get() });
+    .           return localVar;
+    .       }
+
+    The first split function logs a dependency on `state`, but its return
+    value will not change, so `parent` will not be invalidated by a change
+    to `state`.  As a result, changes to `state` might not be reflected in
+    the return value of `parent` during re-evaluation.
+
+    And with aggregates:
+
+    . BAD:   function parent() {
+    .           memo((o) => o.result = Math.floor(state()))({});
+    .           return o.result;
+    .        }
+
+    Here, changes to `state` will invalidate the sub-node and re-evaluate
+    it, but its return value will remain unchanged, and so the caller will
+    not be invalidated.
+
+    The problem with captured varaibles can be narrowed down to cases
+    wherein a nested function modifies a variable that is later read by an
+    outer function, a sibling function (nesting-wise), or sibling of an
+    ancestor (nesting-wise).  [Modifications done by an outer function can
+    only happen when the outer function is re-evaluated, which means that
+    new instances of the inner functions will get created, which defeats
+    memoization and results in fresh evaluations of the nested functions,
+    which will see the new value.]
+
+    . OK:   function parent() {
+    .          let localVar = state.get();
+    .          f = () => localVar;
+    .          return memo(f)();
+    .       }
+
+    Here, modification of `state` will make the sub-node -- `memo(f)()` --
+    invalid, but that will also trigger re-evaluation of `f` which will
+    replace the sub-node with a new sub-node.
+
+    Similarly, we do not have to worry about aggregates initialized by the
+    function that constructs them.
+
+    OK:   memo(f)([localVar]);
+
+    OK:   memo(f)({x: localVar});
+
+    OK:   memo(() => [Math.floor(getState())])();
+
+
+### Conduits
+
+    Conduits provide better encapsulation of changes.  A conduit allows any
+    node to pass a changing value to another node in the graph without
+    invalidating any of the nodes in between.
+
+    Node A:    conduit = memo(() => Math.floor(state()));
+    Node B:    x = conduit();
+
+    Unless node A itself is re-evaluated, the conduit will remain constant
+    while `state` changes.
+
+
+#### Compartmentalization
+
+  <imagine: detailed data flow graph>
+
+    Program evaluation (execution) can be represented as a DAG of data flow.
+    This is not the AST, but the history of execution.  (It follows the AST
+    in places, but functions are expanded where they are called, and it
+    diverges where conditionals or lazy evaulation are involved.)  In our
+    model, some of the leaves are external inputs that may change from one
+    evaluation to the next.
+
+    We might like to optimize re-evaluation at this level, but this will
+    probably be terribly inefficient.
+
+  <imagine: DAG nodes grouped into a super-nodes>
+
+    Instead, we provide a primitive called `memo` that allows the
+    programmer to specify where "bulkheads" can be placed to partition
+    the nodes into separately evaluable sub-graphs.
+
+  <imagine: super-nodes labeled "?">
+
+    The incremental evaluation framework does not have visibility into the
+    nodes.  At each "split" point, it just knows the function, what was
+    passed to it, and what was returned from it.
+
+  <downstream>
+
+    The easiest thing to accomplish is to contain the effects of changes
+    within the subexpression that do not affect the caller.  We can
+    re-evaluate the subexpression, and then if its return value does not
+    change, we can
+
+       Alt text: We can avoid re-evaluating the parent when a child node is
+       re-evaluated.  To do this, we need to record the value it previously
+       returned to the parent, and ensure that the new result does not
+       differ.
+
+  <upstream>
+
+    One complication to keep in mind is that evaluation might follow a
+    different path on a subsequent evlauation, so the DAG will not look the
+    same.  When a parent node is evaluated, how do we know when to associate
+    a `memo` with one that was created in a prior evaluation phase?
+    Memoization.
+
+       Alt text: We can avoid re-evaluating a child node when a parent node
+       is re-evaluated.  This requires identifying a pre-existing node that
+       matches the node being created by the parent as it executes.  For
+       identification, we use memoization, so the function and argument
+       values must match thoes of a node from the previous cycle.
+
+    Memoization could be skipped in cases where downstream firewalling is
+    desired and upstream firewalling is impossible.  For example, whenever
+    the function or one of its args is created during evaluation of the
+    parent, memoization will always fail.
+
+    Memoization *must* take time-changing inputs into account.  Inputs are
+    logged as the function executes, and when a matching node is found, the
+    previous result is *validated*.  Validating a previous result requires
+    re-validating all inputs.
+
+       Define:  Eᵢ = value of expression E at cycle i
+
+       Given:
+           x = memoize(f)(...a)
+           I = input operations performed while evaluating f(...a) and the
+               corresponding results -- [...(o, r)].
+
+       We know:
+           x₀=x₁  ⇐  f₀=f₁ and a₀=a₁ and I₀=I₁
+           Mᵢ = (fᵢ, aᵢ) → (xᵢ, Iᵢ).
+
+       We store (x,I) in M, indexed by (f,a), and then re-validate `I`
+       on a cache hit.  "Valid" means: ∀(o,r) ∈ I: o() = r.
+
+
+### I/O Logging
+
+    We need to ensure that I/O state does not change during recalculation;
+    otherwise we would have an invalid state.
+
+    Idempotent writes (once ~= many)?
+
+       Idempotency would have to apply program-wide.  One node setting "x=1"
+       would conflict with another node setting "x=2".
+
+       Current memoization scheme conflicts, because non-dirty nodes will
+       not be visited and re-asserted (requiring "never ~= once", rather
+       "once ~= many").  Any writes would have to be visited on EVERY update
+       phase (unless we can listen for changes).
+
+
+### Conduits
+
+    Conduits may not be modified during eval time, except at creation.  A
+    "wrap" operation allows the creator of a conduit to specify a function
+    that computes its value (right now, and in future recalculations).
+
+    A "newState" constructor returns a getter and setter, but the programmer
+    must take care to avoid modifying it during evaluation; it may be
+    modified only during event handlers.
+
+
+### Non-blocking Input
+
+    Non-blocking, incremental I/O primitives allow an incremental program to
+    deal with I/O very easily.  They resemble synchronous blocking
+    operations, but on return they may indicate an In-Progress condition, in
+    addition to Complete or Error.
+
+    In UI, it is important to properly reporting such states is important,
+    and this model makes that information readily available.
+
+    Other approaches to ensuring a responsive UI while long-lived I/O
+    operations are asynchronous callback-based APIs, and multi-threaded
+    programming using shared state and synchronization primitives.  These
+    incur complexities similar to those of the UI listener model
+    (registration, de-registration, error handling), as well as other
+    headaches.
