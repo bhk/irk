@@ -1,21 +1,19 @@
-
 import {
     defer, demand, memo, isolate, deferMemo, deferIsolate,
     newState, mostRecent, filterStream,
     getCurrentNode,
 } from "./i.js";
 import E from "./e.js";
-import IDemo from "./idemo.js";
+import {run, demoView} from "./idemo.js";
 import newGrid from "./grid.js";
 import {merge} from "./util.js";
 
 
 // Once E handles registering/dereg of handlers, this is trivial
-//    E.new("button", {content: "# Entries", onclick: onclick})
-//    E.new("button", ["# Entries"], {onclick: onclick})
+//    E({$tag: "button", onclick: onclick}, "# Entries");
 //    newButton("# Entries", onclick)
 const newButton = (text, onclick) => {
-    let e = E.new("button", {content: "# Entries"});
+    let e = E({$tag: "button"}, "# Entries");
     e.onclick = onclick;
     return e;
 }
@@ -25,15 +23,16 @@ const newButton = (text, onclick) => {
 //
 const newInput = (style, text) => {
     const ivalue = newState("");
-    const e = E.new("input", {
+    const e = E({
+        $tag: "input",
         type: "text",
         placeholder: text,
         style: style,
-        listeners: {
+        $events: {
             input: (evt) => (ivalue.set(e.value), true),
         }
     });
-    return {e, value:ivalue.get.bind(ivalue)};
+    return {e, value: ivalue.get.bind(ivalue)};
 };
 
 
@@ -83,7 +82,7 @@ const columns = [
 
 
 const notes = [
-    "Asert: Cannot resize first column; can resize others.",
+    "Assert: Cannot resize first column; can resize others.",
     "Assert: On mouseup, column sizes are updated",
 ];
 
@@ -91,7 +90,7 @@ const notes = [
 const itemCount = newState(sampleEntries.length);
 
 
-IDemo.run((log) => {
+run((log) => {
     getCurrentNode().debugInval = true;
     getCurrentNode().name = "MAIN";
 

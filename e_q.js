@@ -13,37 +13,41 @@ const sheet = document.styleSheets[0];
 assert(sheet);
 
 
-// E.cssName()
-
-eq("float", E.cssName("float"));
-eq("float", E.cssName("cssFloat"));
-eq("-webkit-box-flex", E.cssName("boxFlex"));
-
-eq("2px", E.cssValue(2));
-eq("float -webkit-transform -moz-bar -ms-baz",
-   E.cssValue("#{float} #{transform} #{MozBar} #{msBaz}"));
-
-
-// E.derive
+// E.set : derive new E
 
 eq(true, inRoot(_ => {
-    const Foo = E.derive("foo", {
+    // E(...)
+
+    let e = E();
+    eq(e.tagName, "div");
+    eq(e.className, "");
+    eq(0, e.childNodes.length);
+
+    e = E({$tag: "i"});
+    eq(e.tagName, "i");
+    eq(e.className, "");
+    eq(0, e.childNodes.length);
+
+    e = E({}, "x");
+    eq(e.tagName, "div");
+    eq(e.className, "");
+    eq(1, e.childNodes.length);
+
+    // Derive factory
+
+    const Foo = E.set({
+        $name: "foo",
         color: "black",
         transform: "#{transform} #{color}",
 
-        "?:hover": {
+        "&:hover": {
             color: "blue"
         },
 
-        "?.enabled": {
+        "&.enabled": {
             color: "red"
         }
     });
-
-    eq(".foo", Foo.selector);
-    eq("", E.selector);
-    // ASSERT: styling object stringizes as class names
-    eq("foo", String(Foo));
 
     eq(sheet.cssRules.length, 3);
     eq(sheet.cssRules[0].selectorText, ".foo");
@@ -54,72 +58,36 @@ eq(true, inRoot(_ => {
     eq(sheet.cssRules[1].style.color, "red");
     eq(sheet.cssRules[0].style["-webkit-transform"], "-webkit-transform color");
 
-    // derive from derived class
+    // derive from derived factory
 
-    const Bar = Foo.derive({
+    const Bar = Foo.set({
         color: "blue",
     });
     eq(sheet.cssRules.length, 4);
-    eq(".foo.C0", Bar.selector);
 
+    // Instantiate derived factory
 
-    let e;
-
-    // E.new
-
-    e = E.new();
-    eq(e.tagName, "div");
-    eq(e.className, "");
-    eq(0, e.childNodes.length);
-
-    e = E.new("i");
-    eq(e.tagName, "i");
-    eq(e.className, "");
-    eq(0, e.childNodes.length);
-
-    e = E.new({content: "x"});
-    eq(e.tagName, "div");
-    eq(e.className, "");
-    eq(1, e.childNodes.length);
-
-
-    // <DERIVED>.new,  `content`
-
-    e = Foo.new("span", {
-        content: ["abc", null, "def"],
-    });
+    e = Foo({
+        $tag: "span",
+    }, "abc", null, "def");
     eq(e.tagName, "span");
     eq(e.className, "foo");
     eq(2, e.childNodes.length);
 
+    // Instantiate with $tag, $attrs, properties, and content
 
-    // E.new with content & tagName
-
-    e = Foo.new("span", {
-        class: "foo",
-        content: ["abc", "def"],
-    });
+    e = Foo({
+        $tag: "span",
+        $attrs: {
+            id: "x",
+        },
+        width: 2,
+        color: "black",
+    }, "abc", "def");
     eq(e.tagName, "span");
     eq(e.className, "foo");
+    eq(e.id, "x");
     eq(2, e.childNodes.length);
-
-
-    // E.new class = styling object
-
-    e = E.new({
-        class: Foo,
-    });
-    eq(e.className, "foo");
-
-
-    // E.new with style=styleInfo
-
-    e = E.new({
-        style: {
-            width: 2,
-            color: "black",
-        }
-    });
     eq("2px", e.style.width);
     eq("black", e.style.color);
 
@@ -129,88 +97,73 @@ eq(true, inRoot(_ => {
 // ASSERT: resources are freed on drop
 eq(sheet.cssRules.length, 0);
 
-
-// E.derive with changeable values:
-//    derive: style properties
-//    new: style properties
-//         content attribute
-//         class attribute
+// Test reactivity
 //
+// We create a root cell that constructs a factory and uses it to create an
+// element.  State variables for element content, an element property, and a
+// style property should be able to change while the resulting element
+// persists.  A state variable read by the root cell itself will cause the
+// element to be destroyed and re-created.
 
-
-const icolor = newState("black");
-const ifont = newState("Arial");
-const icontent = newState(["a"]);
-const itag = newState("div");
-
-const mainFn = () => {
-    const CT = E.derive("CT", {
+let dirties = 0;
+let dirtyFn = _ => { dirties += 1; };
+let icontent = newState(["V"]);
+let icolor = newState("black");
+let ifont = newState("sans-serif");
+let ix = newState(0);
+let cellFn = _ => {
+    // Create a new factory and instantiate it
+    const CT = E.set({
+        $name: "CT",
         color: icolor,
     });
 
-    return CT.new(itag.get(), {
-        style: {
-            font: ifont,
-        },
-        content: icontent,
-    });
-}
+    ix.get();
+    return CT({
+        font: ifont,
+    }, ["a", icontent, "b"]);
+};
+let cell = newRoot(cellFn, dirtyFn);
 
-let evts = 0;
-const iroot = newRoot(mainFn, () => {evts += 1000;});
+// Cycle 1
 
-// Eval 1
-
-const e0 = iroot.get();
-eq(e0.tagName, "div");
+let e1 = cell.get();
+eq(dirties, 0);
+eq(e1.childNodes.length, 3);
+eq(e1.textContent, "aVb");
+eq(e1.style.font, "sans-serif");
 eq(sheet.cssRules.length, 1);
 eq(sheet.cssRules[0].selectorText, ".CT");
 eq(sheet.cssRules[0].style.color, "black");
-eq(e0.style.font, "Arial");
-eq(e0.childNodes[0].textContent, "a");
 
-// Eval 2 : change values handled within E
+// Cycle 2: Change values
 
-evts = 0;
+icontent.set(["<", ">"]);
 icolor.set("red");
 ifont.set("mono");
-icontent.set(["b"]);
-eq(evts, 1000);
-const e1 = iroot.get();
-
-// ASSERT: no re-creation of element or class
-assert(e1 === e0);
+let e2 = cell.get();
+// Assert: invalidation occurred
+eq(dirties, 1);
+// Assert: element persists, but content & property have changed
+assert(e1 === e2);
+eq(e2.textContent, "a<>b");
+eq(e2.style.font, "mono");
+// Assert: factory class persists, but property has been updated
 eq(sheet.cssRules[0].selectorText, ".CT");
-// ASSERT: class style has been updated
 eq(sheet.cssRules[0].style.color, "red");
-// ASSERT: element style has been updated
-eq(e1.style.font, "mono");
-// ASSERT: element content has been replaced
-eq(e1.childNodes.length, 1);
-eq(e1.childNodes[0].textContent, "b");
 
-// Eval 3 : invalidate mainFn()
+// Cycle 3: Invalidate root cell
 
-itag.set("span");
-const e2 = iroot.get();
-// ASSERT: new element
-assert(e2 !== e0);
-eq(e2.tagName, "span");
-// ASSERT: no leakage of resources after re-eval
+ix.set(1);
+let e3 = cell.get();
+eq(dirties, 2);
+assert(e3 !== e2);
+eq(e3.textContent, "a<>b");
+// Assert: invalidated cell's resources were dropped
 eq(sheet.cssRules[0].selectorText, ".CT");
-eq(e1.childNodes.length, 1);
 
-// Drop root
+// Drop cell
 
-// ASSERT: no leakage of resources after drop
-iroot.drop();
+// Assert: no leakage of resources
+cell.drop();
 eq(sheet.cssRules.length, 0);
-
-
-// eventStream
-
-inRoot(_ => {
-    const e = E.new({});
-    const s = E.eventStream(e, ["a", "b", "c"]);
-    eq("object", typeof demand(s));
-});

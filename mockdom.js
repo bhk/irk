@@ -18,8 +18,8 @@
 // <StyleRule>.style
 // <Style>.<propertyName>
 
-import {eq, assert} from "./test.js";
-
+import test from "./test.js";
+let {eq, assert} = test;
 
 //--------------------------------
 // CSS classes
@@ -29,7 +29,7 @@ import {eq, assert} from "./test.js";
 //
 
 // JavaScript naming of style object property names; include some prefixed names.
-let sampleProperties = "color font textAlign cssFloat textAlign " +
+let sampleProperties = "color font textAlign float textAlign " +
     "webkitBoxFlex webkitTransform MozFrob msMunge";
 
 class CSSStyleDeclaration extends Array {
@@ -39,8 +39,6 @@ class CSSStyleDeclaration extends Array {
         for (let name of sampleProperties.split(" ")) {
             this[name] = "";
         }
-
-        // Unimpl: cssText(!), cssFloat(!), item(), get/setPropertyX(), etc.
     }
 }
 
@@ -100,6 +98,7 @@ class Node {
     constructor() {
         this._childNodes = [];
         this._listeners = [];
+        this._text = "";
     }
 
     get firstChild() {
@@ -152,8 +151,13 @@ class Node {
 
     set textContent(text) {
         // support use case of removing all child nodes
-        assert(text === "");
+        //TODO: assert(text === "");
         this._childNodes.splice(0, this._childNodes.length);
+        this._text = test;
+    }
+
+    get childNodes() {
+        return this._childNodes;
     }
 }
 
@@ -167,8 +171,6 @@ class Element extends Node {
         tagName = tagName.toLowerCase();
         this.tagName = tagName;
         this._ns = ns;
-        this.className = "";
-        this._style = [];
         this._attrs = new Map();
         this._style = new CSSStyleDeclaration();
     }
@@ -179,12 +181,20 @@ class Element extends Node {
         this._attrs.set(key, value);
     }
 
-    set class(value) {
-        this.className = value;
+    set className(value) {
+        this._attrs.set("class", value);
     }
 
-    get class() {
-        return this.className;
+    get className() {
+        return this._attrs.get("class") || "";
+    }
+
+    set id(id) {
+        this._attrs.set("id", id);
+    }
+
+    get id() {
+        return this._attrs.get("id") || "";
     }
 
     set style(value) {
@@ -216,7 +226,15 @@ class HTMLStyleElement extends Element {
 class Text extends Node {
     constructor(text) {
         super();
-        this.textContent = String(text);
+        this._textContent = String(text);
+    }
+
+    get textContent() {
+        return this._textContent;
+    }
+
+    set textContent(text) {
+        this._textContent = text;
     }
 }
 

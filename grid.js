@@ -38,16 +38,15 @@ const rowHeight = 22;
 //     elements being children of the first column, and columns being a
 //     child of a parent "grid" (which can be scrolled).
 
-
-const GridBase = E.derive({
+const GridBase = E.set({
     display: "grid",
     gridAutoRows: rowHeight + "px",
     font: "12px -apple-system, Helvetica, 'Lucida Grande', sans-serif",
     userSelect: "none",
 });
 
-
-const DataGrid = GridBase.derive("DataGrid", {
+const DataGrid = GridBase.set({
+    $name: "DataGrid",
     overflow: "scroll",         // scroll up/down (just data cells, not headers)
     position: "absolute",
     top: 2,
@@ -56,19 +55,20 @@ const DataGrid = GridBase.derive("DataGrid", {
     right: 0,
 });
 
-
-const DataRow = E.derive("DataRow", {
+const DataRow = E.set({
+    $name: "DataRow",
     gridArea: "1 / 1 / auto / -1",
-    "?.odd" : {
+    "&.odd" : {
         background: "#f3f3f3",
     },
-    "?.selected": {
+    "&.selected": {
         background: "rgba(180,200,255, 0.4)",
     },
 });
 
 
-const DataCell = E.derive("DataCell", {
+const DataCell = E.set({
+    $name: "DataCell",
     padding: "3px 5px",
     overflow: "hidden",
     whiteSpace: "nowrap",
@@ -91,7 +91,8 @@ const DataCell = E.derive("DataCell", {
 //
 
 
-const HdrGrid = GridBase.derive("HdrGrid", {
+const HdrGrid = GridBase.set({
+    $name: "HdrGrid",
     position: "absolute",
     top: 0,
     left: 0,
@@ -102,7 +103,8 @@ const HdrGrid = GridBase.derive("HdrGrid", {
 });
 
 
-const HdrCell = E.derive("HdrCell", {
+const HdrCell = E.set({
+    $name: "HdrCell",
     position: "relative",
 });
 
@@ -110,7 +112,8 @@ const HdrCell = E.derive("HdrCell", {
 // "sort" class => header is primary sort key
 // "up" class => sort direction is ascending
 //
-const HdrLabel = E.derive("HdrLabel", {
+const HdrLabel = E.set({
+    $name: "HdrLabel",
     padding: "4px 5px 2px 4px",
     overflow: "hidden",
     whiteSpace: "nowrap",
@@ -119,12 +122,12 @@ const HdrLabel = E.derive("HdrLabel", {
     background: "white",
     left: 0,
     // sort keys are displayed slightly boldfaced
-    "?.sort": {
+    "&.sort": {
         fontWeight: "600",
         paddingRight: 18,
     },
     // "::after" pseudo-element contains up/down indicator
-    "?.sort::after": {
+    "&.sort::after": {
         position: "absolute",
         right: 3,
         content: "'\u25bc'",  // 0x25BC = Black down-pointing triangle: ▼
@@ -137,14 +140,15 @@ const HdrLabel = E.derive("HdrLabel", {
         paddingTop: 2,
         fontSize: "90%",
     },
-    "?.sort.up::after": {
+    "&.sort.up::after": {
         content: "'\u25B2'",  // 0x25B2 = Black up-pointing triangle: ▲
         paddingTop: 0,
     }
 });
 
 
-const Divider = E.derive("Divider", {
+const Divider = E.set({
+    $name: "Divider",
     position: "absolute",
 
     // The content area of this element is a thin vertical bar.
@@ -163,7 +167,8 @@ const Divider = E.derive("Divider", {
 });
 
 
-const Dragger = Divider.derive("Dragger", {
+const Dragger = Divider.set({
+    $name: "Dragger",
     cursor: "col-resize",
 });
 
@@ -172,7 +177,8 @@ const Dragger = Divider.derive("Dragger", {
 // GridTop
 //--------------------------------------------------------------
 
-const GridTop = E.derive("GridTop", {
+const GridTop = E.set({
+    $name: "GridTop",
     overflow: "hidden",
     background: "white",
     // fill parent
@@ -184,21 +190,18 @@ const GridTop = E.derive("GridTop", {
 });
 
 
-const newRowElement = (rowIndex) => E.new({
-    class: DataRow + (rowIndex % 2 == 1 ? " odd" : ""),
-    style: {
-        gridRowStart: String(rowIndex),
-    }
-});
-
-
-const newCell = (value, fmt, align, rowIndex, colIndex) => DataCell.new({
-    content: [fmt ? fmt(value) : value],
-    style: {
-        textAlign: align || "",
-        gridArea: (rowIndex+2) + " / " + (colIndex+1),
+const newRowElement = (rowIndex) => E({
+    $attrs: {
+        class: DataRow + (rowIndex % 2 == 1 ? " odd" : ""),
     },
+    gridRowStart: String(rowIndex),
 });
+
+
+const newCell = (value, fmt, align, rowIndex, colIndex) => DataCell({
+    textAlign: align || "",
+    gridArea: (rowIndex+2) + " / " + (colIndex+1),
+}, fmt ? fmt(value) : value);
 
 
 const createGridCells = (db, columns, fields) => {
@@ -233,35 +236,27 @@ const newColHeader = (fields, colInfo, colIndex) => {
 
     let colWidth, eDivider;
     if (key == null) {
-        eDivider = Divider.new();
+        eDivider = Divider();
         colWidth = width;
     } else {
-        eDivider = Dragger.new();
-        const dragPos = mostRecent(E.dragStream(eDivider), {dx: 0});
+        eDivider = Dragger();
+        //TODO: const dragPos = mostRecent(E.dragStream(eDivider), {dx: 0});
+        const dragPos = {dx: 0};
         colWidth = defer(_ => width + demand(dragPos).dx);
     }
 
     // header label
-    const eLabel =
-          (label
-           ? E.new({
-               content: label,
-               class: HdrLabel + (sort ? " sort " + sort : ""),
-               style: {
-                   textAlign: (align ? align : ""),
-                   fontWeight: (sort ? "600" : ""),
-               },})
-           : null);
+    const eLabel = label &&
+          E({
+              textAlign: (align ? align : ""),
+              fontWeight: (sort ? "600" : ""),
+              $attrs: {
+                  class: HdrLabel + (sort ? " sort " + sort : ""),
+              },
+          }, label);
 
-    const cell = HdrCell.new({
-        content: [
-            eLabel,
-            eDivider
-        ],
-        style: {
-            gridArea: "1 / " + (colIndex+1),
-        },
-    });
+    const cell = HdrCell({gridArea: "1 / " + (colIndex+1)},
+                         eLabel, eDivider);
 
     return [cell, colWidth];
 };
@@ -300,19 +295,11 @@ const newGrid = (columns, fields, db, fnRowClicked) => {
     // This value describes the widths of all columns
     const gtc = defer(_ => widths.map(w => demand(w)+"px").join(" ") + " 1fr");
 
-    const hdrGrid = HdrGrid.new({
-        style: {
-            gridTemplateColumns: gtc,
-        },
-        content: headers,
-    });
+    const hdrGrid = HdrGrid({gridTemplateColumns: gtc}, headers);
 
-    const dataGrid = DataGrid.new({
-        style: {
-            gridTemplateColumns: gtc,
-        },
-        content: defer(_ => createGridCells(demand(db), columns, fields)),
-        listeners: {
+    const dataGrid = DataGrid({
+        gridTemplateColumns: gtc,
+        $events: {
             scroll: () => {
                 hdrGrid.style.left = -dataGrid.scrollLeft + "px";
             },
@@ -324,12 +311,10 @@ const newGrid = (columns, fields, db, fnRowClicked) => {
                     }
                 }
             },
-        }
-    });
+        },
+    }, defer(_ => createGridCells(demand(db), columns, fields)));
 
-    return  GridTop.new({
-        content: [dataGrid, hdrGrid],
-    });
+    return GridTop(null, dataGrid, hdrGrid);
 };
 
 

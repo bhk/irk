@@ -1,4 +1,16 @@
 // test.js:  Unit testing utilities
+//
+// This module can be conditionally excluded from a bundle by substituting
+// `no-test.js` for `test.js`.  Client modules may contain test cases that
+// will likewise be conditionally excluded:
+//
+//    import test from "./test.js";
+//
+//    if (test) {
+//       let {eq, assert} = test;
+//       ...tests...
+//    }
+//
 
 let idRE = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
 
@@ -14,7 +26,7 @@ let seenPrototypes = [];
 let getPrototypeName = (obj) => {
     let p = Object.getPrototypeOf(obj);
     if (p === Object.prototype) {
-       return 'Object.prototype';
+        return 'Object.prototype';
     } else if (p === Array.prototype) {
         return 'Array.prototype';
     } else if (! isObject(p)) {
@@ -120,7 +132,7 @@ let puts;
 if (isBrowser) {
     puts = str => console.log(str);
 } else {
-    let fs = import('fs');
+    let fs = await import('fs');
     puts = str => fs.writeSync(2, str);
 }
 
@@ -204,10 +216,6 @@ let assert = (cond) => {
     }
 };
 
-
-export {serialize, sprintf, printf, isEQ, eq, eqAt, failAt, fail, assert};
-
-
 ////////////////////////////////////////////////////////////////
 // Tests
 ////////////////////////////////////////////////////////////////
@@ -244,3 +252,8 @@ eq("1,2", sprintf("%s,%d", 1, 2));
 eq("a[1,2]", sprintf("a%q", [1,2]));
 eq("a: 1, 2", sprintf("a: %a", [1,2]));
 eq("{a:1,b:2}", sprintf("%q", {a:1,b:2}));
+
+
+export default {
+    serialize, sprintf, printf, isEQ, eq, eqAt, failAt, fail, assert
+};

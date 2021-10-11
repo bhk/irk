@@ -1,31 +1,54 @@
 Alias(default).in = TestJS@tests
+Alias(demo).in = Demo(grid_demo.js)
 
-tests = i_q.js e_q.js grid_q.js util_q.js
-
-TestJS.inherit = Exec
-TestJS.exec = node {<}
-TestJS.in = {inherit} $(filter-out %_q.js,$(wildcard *.js))
+tests = util_q.js i_q.js e_q.js grid_q.js
 
 
-# rollup.js notes:
-#  - no -M functionality, but we can provide a plugin that does it.
-#  - `-c` option *maybe* interprets next word as an argument: if begins
-#    with `-`, use rollup.config.js, else consume it.
-#  - Use `--format iife` if <SCRIPT> does not use `type=module`.
+# TestJS(TEST) : Execute TEST Javascript file using node.
+#
+# We use `--experimental-loader` to track implied deps.
+#
+TestJS.inherit = Builder
+TestJS.command = @{env} node {depsFlags} {<} && touch {@}
+TestJS.env = NODE_NO_WARNINGS=1 TestJS_MT={@}
+TestJS.depsFlags = --experimental-loader ./build/node-M.js
+TestJS.rule = -include {@}.d$(\n){inherit}
+
+
+# Demo(FILE): Shorthand for Open(JSToHTML(Bundle(FILE)))
+#
+Demo.inherit = Phony
+Demo.in = Open(JSToHTML(Bundle($(_argText))))
+
+
+# Open(FILE) : Launch a browser/viewer on FILE
+#
+Open.inherit = Phony
+Open.command = open -a "Google Chrome" {<}
+
+
+# Bundle(SOURCE,[min:1]) : Bundle JS module SOURCE with its dependencies.
+#
+# We use a rollup config file to track implied dependencies and optionally
+# minify.
 #
 Bundle.inherit = Builder
 Bundle.command = {env} rollup {<} -c {up<} --failAfterWarnings --file {@}
-Bundle.env = MINIFY=1 REMAP='test.js=no-test.js'
+Bundle.env = $(if {min},MINIFY=1 )REMAP='test.js=no-test.js'
 Bundle.rule = -include {@}.d$(\n){inherit}
-Bundle.up = rollup.config.js
+Bundle.up = build/rollup.config.js
+Bundle.min = $(call _namedArgs,min)
+
+
+# JSToHTML(JS) : Create an HTML file that runs a JS module.
+#
+JSToHTML.inherit = Builder
+JSToHTML.outExt = .html
+JSToHTML.command = node build/js-to-html.js {<} -o {@}
 
 
 JSMin.inherit = Builder
 JSMin.command = terser --compress "ecma=2015,toplevel,unsafe_arrows" --mangle toplevel --define globalThis.TEST=false -o {@} {<}
-
-
-CSSMin.inherit = Builder
-CSSMin.command = csso {<} --output {@}
 
 
 include ../minion/minion.mk

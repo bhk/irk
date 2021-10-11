@@ -1,33 +1,27 @@
 Current
 =======
 
- + Makefile: Run unit tests
- + Bundle w/ implied deps & stripping tests (using remapping)
- - generate implied dependencies of tests
- - Makefile: open demo JS as web page
+ - grid_demo: events
+ - grid_demo: `onclick` reg/de-reg?
+ - drag_demo
+ - player
+ - svg
+ - exposer
 
-    1. Use `if (FALSE) ...` toggled by `--define`.  Problem: minification
-       happens after bundling.  Bundling pulls in external modules that are
-       never used.
-
-
-     * `terser INFILE --define TEST=false`
-         -> elides `if (TEST) { ... }`
-         -> does not elide `if (glogalThis.TEST) { ... }`
-     * `if (TEST) { ... }` generates run-time error when not elided
-     * `globalThis.TEST=true` avoids the run-time error
-
- - i.js:
-
-   * Describe `memo`
-   * defer(f, ...args)
-        defer(_ => f(a,b))  <-->   defer(f, a, b)
-   * Remove deferMemo
-        deferMemo(f)(a,b)    -->   defer(memo(f), a,b)
-
-   * Document "monitoring": "during execution of a cell, its accesses of
-     other cells (inputs, intermediates) are logged."
-
+ - minion: easy way to silence commands per-class
+ - e.js: dereg listener on drop? [needed?]
+ - e.js: Simplify E to E(props, ...content)
+ - e.js: Optimize setContent?
+ - e.js: {$class: X}  vs.  {$attrs: {class: X}}
+ - i.js: When outside of any cell, memos are no-ops
+ - i.js: refactor...
+    * Describe `memo`
+    * defer(f, ...args)
+         defer(_ => f(a,b))  <-->   defer(f, a, b)
+    * Remove deferMemo
+         deferMemo(f)(a,b)    -->   defer(memo(f), a,b)
+ - i.js: Document "monitoring": "during execution of a cell, its accesses of
+   other cells (inputs, intermediates) are logged."
 
 Notes
 =====
@@ -43,3 +37,6 @@ Notes
 
    - We add `"type":"module"` to package.json so Node will recognize them
      as such.
+
+ * `./test.js` is remapped to `./no-test.js` when bulding bundles for the
+   browser.  With minification, this also discards embedded unit tests.
