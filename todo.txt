@@ -22,8 +22,9 @@ Current
  - e.js: dereg listener on drop? [needed?]
  - Validate "clean" install using "npm update"
  - minion: {deps} should contribute to {needs} (?)
+ - minion: add {depsCommand} and {depsFile}
+     depsCommand does not influence the output file (not incl. in vvValue)
  - minion: easy way to silence commands per-class?
- - minion: {depMakefiles} (?)
 
 Notes
 =====

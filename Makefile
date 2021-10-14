@@ -22,10 +22,13 @@ TestJS.depsFlags = --experimental-loader ./build/node-M.js
 TestJS.rule = -include {@}.d$(\n){inherit}
 
 
-# Demo(FILE): Shorthand for Open(JSToHTML(Bundle(FILE)))
+# Demo(NAME): Shorthand that builds JSToHTML(Bundle(NAME_demo.js))
+# ODemo(NAME): Shorthand for Open(JSToHTML(Bundle(NAME_demo.js)))
 #
 Demo.inherit = Phony
-Demo.in = Open(JSToHTML(Bundle($(_argText)_demo.js)))
+Demo.in = JSToHTML(Bundle($(_arg1)_demo.js))
+ODemo.inherit = Demo
+ODemo.in = Open({inherit})
 
 
 # Open(FILE) : Launch a browser/viewer on FILE
@@ -34,19 +37,38 @@ Open.inherit = Phony
 Open.command = open -a "Google Chrome" {<}
 
 
-# Bundle(SOURCE,[min:1]) : Bundle JS module SOURCE with its dependencies.
+# Bundle(SOURCE,[min:1]) : Bundle JavaScript SOURCE with its dependencies.
+#
+Bundle.inherit = ESBuild
+
+
+# ESBuild(SOURCE,[min:1]) : Bundle with esbuild.
+#
+ESBuild.inherit = Builder
+ESBuild.min = $(call _namedArgs,min)
+ESBuild.command = {bundleCmd}$(\n){depsCmd}
+ESBuild.bundleCmd = ./node_modules/.bin/esbuild --outfile={@} {<} --bundle $(if {min},--minify) --metafile={@}.json --color=false --log-level=warning
+ESBuild.depsCmd = @node -p '(([k,v])=>k+": "+Object.keys(v.inputs).join(" "))(Object.entries(require("./{@}.json").outputs)[0])' > {depsFile}
+ESBuild.rule = -include {depsFile}$(\n){inherit}
+ESBuild.depsFile = {@}.d
+ESBuild.vvValue = $(call _vvEnc,{bundleCmd},{@})
+# Better to catch glaring bugs in node than in a browser...
+ESBuild.oo = $(call testFor,{<})
+
+
+# Rollup(SOURCE,[min:1]) : Bundle with rollup.js.
 #
 # We use a rollup config file to track implied dependencies and optionally
 # minify.
 #
-Bundle.inherit = Builder
-Bundle.command = {env} rollup {<} -c {up<} --failAfterWarnings --file {@}
-Bundle.env = $(if {min},MINIFY=1 )REMAP='test.js=no-test.js'
-Bundle.rule = -include {@}.d$(\n){inherit}
-Bundle.up = build/rollup.config.js
-Bundle.min = $(call _namedArgs,min)
+Rollup.inherit = Builder
+Rollup.min = $(call _namedArgs,min)
+Rollup.command = {env} rollup {<} -c {up<} --failAfterWarnings --file {@}
+Rollup.env = $(if {min},MINIFY=1 )REMAP='test.js=no-test.js'
+Rollup.rule = -include {@}.d$(\n){inherit}
+Rollup.up = build/rollup.config.js
 # Better to catch glaring bugs in node than in a browser...
-Bundle.oo = $(call testFor,{<})
+Rollup.oo = $(call testFor,{<})
 
 
 # JSToHTML(JS) : Create an HTML file that runs a JS module.
