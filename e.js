@@ -337,12 +337,17 @@ let setAttr = (e, name, value) => {
 
 let setAttrs = (e, attrs, autoClass) => {
     for (let key in attrs) {
-        setAttr(e, key, attrs[key]);
+        if (key == "class") {
+            isolate(_ => {
+                let value = demand(attrs[key]);
+                e.setAttribute(key, autoClass + (value ? " " + value : ""));
+            });
+        } else {
+            setAttr(e, key, attrs[key]);
+        }
     }
-    if (autoClass != "") {
-        // If attrs.class was set above, we will override it here.
-        // Note: Setting `e.className` does not work for SVG elements.
-        setAttr(e, "class", autoClass + (attrs.class ? " " + attrs.class : ""));
+    if (autoClass && !("class" in attrs)) {
+        e.setAttribute("class", autoClass);
     }
 };
 

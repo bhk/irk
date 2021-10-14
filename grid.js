@@ -6,10 +6,8 @@ import {defer, demand, mostRecent} from "./i.js";
 
 const max = (a,b) => a<b ? b : a;
 
-
 const MINWIDTH = 40;
 const rowHeight = 22;
-
 
 //--------------------------------------------------------------
 // Element styling classes
@@ -66,7 +64,6 @@ const DataRow = E.set({
     },
 });
 
-
 const DataCell = E.set({
     $name: "DataCell",
     padding: "3px 5px",
@@ -75,7 +72,6 @@ const DataCell = E.set({
     textOverflow: "ellipsis",
     pointerEvents: "none",
 });
-
 
 // HdrGrid consists of one row, plus a single pixel of border above and
 // below.  It contains one HdrCell for each column.
@@ -90,7 +86,6 @@ const DataCell = E.set({
 //    to the right).
 //
 
-
 const HdrGrid = GridBase.set({
     $name: "HdrGrid",
     position: "absolute",
@@ -102,12 +97,10 @@ const HdrGrid = GridBase.set({
     background: "white",
 });
 
-
 const HdrCell = E.set({
     $name: "HdrCell",
     position: "relative",
 });
-
 
 // "sort" class => header is primary sort key
 // "up" class => sort direction is ascending
@@ -146,7 +139,6 @@ const HdrLabel = E.set({
     }
 });
 
-
 const Divider = E.set({
     $name: "Divider",
     position: "absolute",
@@ -166,12 +158,10 @@ const Divider = E.set({
     borderColor: "white",
 });
 
-
 const Dragger = Divider.set({
     $name: "Dragger",
     cursor: "col-resize",
 });
-
 
 //--------------------------------------------------------------
 // GridTop
@@ -189,20 +179,17 @@ const GridTop = E.set({
     top: 0,
 });
 
-
-const newRowElement = (rowIndex) => E({
-    $attrs: {
-        class: DataRow + (rowIndex % 2 == 1 ? " odd" : ""),
-    },
+const newRowElement = (rowIndex) => DataRow({
     gridRowStart: String(rowIndex),
+    $attrs: {
+        class: (rowIndex % 2 == 1 ? "odd" : ""),
+    },
 });
-
 
 const newCell = (value, fmt, align, rowIndex, colIndex) => DataCell({
     textAlign: align || "",
     gridArea: (rowIndex+2) + " / " + (colIndex+1),
 }, fmt ? fmt(value) : value);
-
 
 const createGridCells = (db, columns, fields) => {
     const o = [];
@@ -226,7 +213,6 @@ const createGridCells = (db, columns, fields) => {
     return o;
 };
 
-
 // Note: column header elements must appear in reverse order so that
 // dragger elements stack correctly.
 //
@@ -247,11 +233,11 @@ const newColHeader = (fields, colInfo, colIndex) => {
 
     // header label
     const eLabel = label &&
-          E({
+          HdrLabel({
               textAlign: (align ? align : ""),
               fontWeight: (sort ? "600" : ""),
               $attrs: {
-                  class: HdrLabel + (sort ? " sort " + sort : ""),
+                  class: sort ? "sort " + sort : "",
               },
           }, label);
 
@@ -260,7 +246,6 @@ const newColHeader = (fields, colInfo, colIndex) => {
 
     return [cell, colWidth];
 };
-
 
 // columns = array of {key, width, sort}
 //    This describes which columns are displayed and how.
@@ -316,6 +301,5 @@ const newGrid = (columns, fields, db, fnRowClicked) => {
 
     return GridTop(null, dataGrid, hdrGrid);
 };
-
 
 export default newGrid;

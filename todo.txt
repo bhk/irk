@@ -1,19 +1,14 @@
 Current
 =======
 
- - grid_demo: events
- - grid_demo: `onclick` reg/de-reg?
- - drag_demo
- - player
- - svg
- - exposer
+ - Get functionality working:
+   - grid_demo: drag events (eventutils:captureDrag ?)
+   - player
+   - svg
+   - exposer
 
- - minion: easy way to silence commands per-class
- - e.js: dereg listener on drop? [needed?]
- - e.js: Simplify E to E(props, ...content)
- - e.js: Optimize setContent?
- - e.js: {$class: X}  vs.  {$attrs: {class: X}}
  - i.js: When outside of any cell, memos are no-ops
+ - i.js: Make "isolate" lightweight when a no-op (no child cells)
  - i.js: refactor...
     * Describe `memo`
     * defer(f, ...args)
@@ -23,10 +18,21 @@ Current
  - i.js: Document "monitoring": "during execution of a cell, its accesses of
    other cells (inputs, intermediates) are logged."
 
+ - e.js: Optimize setContent? (not re-populate all children?)
+ - e.js: dereg listener on drop? [needed?]
+ - Validate "clean" install using "npm update"
+ - minion: {deps} should contribute to {needs} (?)
+ - minion: easy way to silence commands per-class?
+ - minion: {depMakefiles} (?)
+
 Notes
 =====
 
  * `$ npm update` installs dependencies.
+
+ * FOO_q.js = test for FOO.js
+   FOO_demo.js = interactive demo/text for FOO.js, viewable with
+      `make 'Demo(FOO_demo.js)`
 
  * Javascript sources are ES "modules", and should be directly usable,
    as-is, by a browser or Node.js.  This implies:

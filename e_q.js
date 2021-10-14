@@ -110,6 +110,8 @@ let dirtyFn = _ => { dirties += 1; };
 let icontent = newState(["V"]);
 let icolor = newState("black");
 let ifont = newState("sans-serif");
+let ialt = newState("ALT1");
+let iclass = newState("up");
 let ix = newState(0);
 let cellFn = _ => {
     // Create a new factory and instantiate it
@@ -121,6 +123,10 @@ let cellFn = _ => {
     ix.get();
     return CT({
         font: ifont,
+        $attrs: {
+            alt: ialt,
+            class: iclass,
+        },
     }, ["a", icontent, "b"]);
 };
 let cell = newRoot(cellFn, dirtyFn);
@@ -132,6 +138,8 @@ eq(dirties, 0);
 eq(e1.childNodes.length, 3);
 eq(e1.textContent, "aVb");
 eq(e1.style.font, "sans-serif");
+eq(e1.getAttribute("class"), "CT up");
+eq(e1.getAttribute("alt"), "ALT1");
 eq(sheet.cssRules.length, 1);
 eq(sheet.cssRules[0].selectorText, ".CT");
 eq(sheet.cssRules[0].style.color, "black");
@@ -141,6 +149,8 @@ eq(sheet.cssRules[0].style.color, "black");
 icontent.set(["<", ">"]);
 icolor.set("red");
 ifont.set("mono");
+ialt.set("ALT2");
+iclass.set(null);
 let e2 = cell.get();
 // Assert: invalidation occurred
 eq(dirties, 1);
@@ -148,6 +158,8 @@ eq(dirties, 1);
 assert(e1 === e2);
 eq(e2.textContent, "a<>b");
 eq(e2.style.font, "mono");
+eq(e1.getAttribute("class"), "CT");
+eq(e1.getAttribute("alt"), "ALT2");
 // Assert: factory class persists, but property has been updated
 eq(sheet.cssRules[0].selectorText, ".CT");
 eq(sheet.cssRules[0].style.color, "red");

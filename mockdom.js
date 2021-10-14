@@ -181,12 +181,17 @@ class Element extends Node {
         this._attrs.set(key, value);
     }
 
+    getAttribute(key) {
+        assert(typeof key == "string");
+        return this._attrs.get(key) || "";
+    }
+
     set className(value) {
         this._attrs.set("class", value);
     }
 
     get className() {
-        return this._attrs.get("class") || "";
+        return this.getAttribute("class");
     }
 
     set id(id) {

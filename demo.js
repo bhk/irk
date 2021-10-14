@@ -1,25 +1,27 @@
+// demo: Display a web page for demonstrating a JS module.
+//
+
 import {newState, defer, activate} from "./i.js";
 import {E, setContent} from "./e.js";
 
 // Export for debugging
 window.E = E;
 
-
 // This element contains the element[s] under test.
 //
 const Frame = E.set({
     $name: "Frame",
-    border: "1px solid #888",
+    border: "2px solid #888",
     background: "#f0ede8",
     position: "relative",
-    height: 200,
+    height: 350,
 });
 
 const Log = E.set({
     $name: "Log",
     margin: 8,
     paddingTop: 8,
-    font: "14px Arial, Helvetica",
+    font: "14px Avenir, Arial, Helvetica",
     border: "0px solid #888",
     borderTopWidth: 1,
 });
@@ -36,51 +38,43 @@ const Demo = E.set({
     background: "#ccc",
 });
 
-const newLog = () => {
-    const a = newState([]);
-    return {
-        append: (str) => a.set(a.get().concat([str])),
-        get: a.get.bind(a),
-    };
-}
-
+//
+// Log
+//
+let logState = newState([]);
+let log = (str) => logState.set([...logState.get(), str]);
+let LogLine = E.set({$tag: "p"});
 
 // `style` applies to the frame containing the element under test.
 // For example, size, background, and position (static or relative).
 //
-const demoView = ({subject, style, buttons, notes, log, subjectTime}) => {
-    console.log("demoView!");
-
+const demoView = ({subject, controls, frameStyle}) => {
     return Demo(null, [
-        // buttons
-        E({margin: 6}, buttons),
-
         // frame
-        Frame(style, subject),
+        Frame(frameStyle, subject),
 
-        // notes
+        // controls
         E({
             $tag: "ul",
-            font: "12px Arial, Helvetica",
-        }, (notes || []).map(note => E({$tag: "li"}, note))),
+            font: "16px Avenir, Arial, Helvetica",
+            margin: 6,
+        }, (controls || []).map(c => E({$tag: "li"}, c))),
 
         // log
-        Log(null, log && defer(_ => log.get().forEach(e => E(null, e)))),
-
-        // Time
-        E({$tag: "pre"}, subjectTime),
+        Log(null, defer(_ => {
+            return logState.get().map(e => LogLine(null, e));
+        })),
     ]);
 }
 
-
 // Evaluate `main` and display its results in the demo context.
 // The results of `main()` are passed to `demoView`.
+//
 const run = (main) => {
-    let log = newLog();
     activate(() => {
-        const opts = main(log);
+        const opts = main();
         const top = demoView(opts);
-        setContent(document.body, [top]);
+        setContent(document.body, top);
         // Display dependencies:
         //        for (let [c, result] of getCurrentNode().children) {
         //            console.log("D[" + String(c.f) + " -> " + result + "]");
@@ -88,8 +82,7 @@ const run = (main) => {
     });
 };
 
-
 export {
     run,
-    demoView,
+    log,
 };

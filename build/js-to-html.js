@@ -9,9 +9,9 @@ let template = [
     "  <head>",
     "    <meta charset=utf-8>",
     "    <meta name=viewport content='width=786'>",
-    "    <title>SVG Demo</title>",
+    "    <title>TITLE</title>",
     "    <style>",
-    "      body { margin: 20px; font: 24px Avenir; }",
+    "      body { margin: 20px; font: 16px Arial, Helvetica; }",
     "    </style>",
     "  </head>",
     "  <body>",
@@ -42,5 +42,8 @@ if (process.argv[3] == "-o") {
 }
 
 let code = await readFile(inFile, 'utf8');
-let html = template.replace(/SCRIPT/, escapeScript(code));
+let html = template.replace(/SCRIPT|TITLE/g,
+                            match => (match == "TITLE"
+                                      ? inFile.match(/[^/]*$/)[0] :
+                                      escapeScript(code)));
 await writeFile(outFile, html);

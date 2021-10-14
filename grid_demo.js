@@ -4,37 +4,33 @@ import {
     getCurrentNode,
 } from "./i.js";
 import E from "./e.js";
-import {run, demoView} from "./idemo.js";
+import {run, log} from "./demo.js";
 import newGrid from "./grid.js";
 import {merge} from "./util.js";
 
-
-// Once E handles registering/dereg of handlers, this is trivial
-//    E({$tag: "button", onclick: onclick}, "# Entries");
-//    newButton("# Entries", onclick)
-const newButton = (text, onclick) => {
-    let e = E({$tag: "button"}, "# Entries");
-    e.onclick = onclick;
-    return e;
-}
-
+const newButton = (text, onclick) =>
+      E({
+          $tag: "button",
+          $events: {click: onclick},
+      }, "# Entries");
 
 // Returns conduit holding input field contents.
 //
 const newInput = (style, text) => {
     const ivalue = newState("");
     const e = E({
+        ...style,
         $tag: "input",
-        type: "text",
-        placeholder: text,
-        style: style,
+        $attrs: {
+            type: "text",
+            placeholder: text,
+        },
         $events: {
             input: (evt) => (ivalue.set(e.value), true),
         }
     });
     return {e, value: ivalue.get.bind(ivalue)};
 };
-
 
 //----------------------------------------------------------------
 // Data
@@ -57,7 +53,6 @@ const sampleEntries = [
      "The Original UA Hits", "2:43", "1965", "Country", "0"],
 ];
 
-
 const fields = {
     "0": {label: "Name"},
     "1": {label: "Artist"},
@@ -67,7 +62,6 @@ const fields = {
     "5": {label: "Genre"},
     "6": {label: "♡", align: "center"},
 };
-
 
 const columns = [
     {key: null, width: 26},
@@ -80,25 +74,24 @@ const columns = [
     {key: "6", width:  24},
 ];
 
-
 const notes = [
     "Assert: Cannot resize first column; can resize others.",
     "Assert: On mouseup, column sizes are updated",
 ];
 
-
 const itemCount = newState(sampleEntries.length);
 
-
-run((log) => {
+run(_ => {
     getCurrentNode().debugInval = true;
     getCurrentNode().name = "MAIN";
 
-    let rowClicked = (row) => log.append("Click: row " + row);
+    let rowClicked = (row) => log("Click: row " + row);
 
     let entries = newInput({}, "# Entries...");
-    let buttons = [
+    let controls = [
         entries.e,
+        "Assert: Cannot resize first column; can resize others.",
+        "Assert: On mouseup, column sizes are updated",
     ];
 
     let db = deferMemo(_ => {
@@ -112,17 +105,9 @@ run((log) => {
     })();
     let subject = newGrid(columns, fields, db, rowClicked);
 
-    // frame style
-    let style = {
-        //color: "white",
-        height: 350,
-        background: "#fff",
-        border: "1px solid white",
-    };
-
     // for (let [c, result] of getCurrentNode().children) {
     //     console.log("[" + String(c.f) + " -> " + result + "]");
     // }
 
-    return {subject, buttons, style, notes, log};
+    return {subject, controls};
 });

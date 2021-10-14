@@ -2,7 +2,7 @@
 
 const I = require("incremental.js");
 const E = require("e.js");
-const IDemo = require("idemo.js");
+const {run, log} = require("demo.js");
 
 const {
     defer, demand, mostRecent,
