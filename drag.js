@@ -38,9 +38,9 @@ let listen = (elem, listeners, useCapture) => {
 //   target.dragStop(isDrop): called on completion. When `isDrop` is
 //        non-truthy, the operation has been canceled.
 //
-//   target.dragMove(xy): called zero or more times between dragStart &
-//        dragStop.  `xy` is a point -- [x,y] -- that gives the current
-//        (dragged) position minus the starting position.
+//   target.dragMove(dx, dy, event): called zero or more times between
+//        dragStart & dragStop.  (dx, dy) gives the current (dragged)
+//        position minus the starting position.
 //
 // Note that the CSS property "touch-action: none;" should be applied to the
 // element, as per <www.w3.org/TR/pointerevents2/>.

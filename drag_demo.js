@@ -17,7 +17,6 @@ let Box = E.set({
     userSelect: "none",
     textAlign: "center",
     padding: 3,
-    userSelect: "none",
     backgroundColor: "#ddd",
 
     "&.state1": { backgroundColor: "#ee8", },    /* being dragged */

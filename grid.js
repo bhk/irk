@@ -1,8 +1,10 @@
 // grid.js
 
 import E from "./e.js";
+import {handleDrag} from "./drag.js";
 // TODO: import {captureUtils} from "./eventutils.js";
-import {defer, demand, mostRecent} from "./i.js";
+
+import {defer, demand, mostRecent, newState, onDrop} from "./i.js";
 
 const max = (a,b) => a<b ? b : a;
 
@@ -80,7 +82,8 @@ const DataCell = E.set({
 //    rightmost pixel column of each grid cell).
 //  - The divider line (and the few pixels left and right of it) is
 //    "draggable" when its column it resizable.
-//  - The header text must be clipped => "overflow: hidden" on some element.
+//  - The header text must be clipped => "overflow: hidden" on some element
+//    that also restricts height and width.
 //  - The draggable area of a cell divider extends beyond the grid cell into
 //    the next grid cell to the right (so it must be layered above the cell
 //    to the right).
@@ -100,6 +103,7 @@ const HdrGrid = GridBase.set({
 const HdrCell = E.set({
     $name: "HdrCell",
     position: "relative",
+    overflow: "hidden",
 });
 
 // "sort" class => header is primary sort key
@@ -108,7 +112,6 @@ const HdrCell = E.set({
 const HdrLabel = E.set({
     $name: "HdrLabel",
     padding: "4px 5px 2px 4px",
-    overflow: "hidden",
     whiteSpace: "nowrap",
     textOverflow: "none",
     position: "relative",
@@ -225,10 +228,21 @@ const newColHeader = (fields, colInfo, colIndex) => {
         eDivider = Divider();
         colWidth = width;
     } else {
+        let dragDx = newState(0);
+        let restWidth = newState(width);
+        colWidth = defer(_ => dragDx.get() + restWidth.get());
         eDivider = Dragger();
-        //TODO: const dragPos = mostRecent(E.dragStream(eDivider), {dx: 0});
-        const dragPos = {dx: 0};
-        colWidth = defer(_ => width + demand(dragPos).dx);
+        let dereg = handleDrag(eDivider, {
+            dragMove: (dx, dy) => {
+                dragDx.set(dx);
+            },
+            dragStop: () => {
+                restWidth.set(restWidth.get() + dragDx.get());
+                dragDx.set(0);
+            },
+            dragStart: () => {},
+        });
+        onDrop(dereg);
     }
 
     // header label
