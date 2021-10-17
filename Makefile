@@ -56,21 +56,6 @@ ESBuild.vvValue = $(call _vvEnc,{bundleCmd},{@})
 ESBuild.oo = $(call testFor,{<})
 
 
-# Rollup(SOURCE,[min:1]) : Bundle with rollup.js.
-#
-# We use a rollup config file to track implied dependencies and optionally
-# minify.
-#
-Rollup.inherit = Builder
-Rollup.min = $(call _namedArgs,min)
-Rollup.command = {env} rollup {<} -c {up<} --failAfterWarnings --file {@}
-Rollup.env = $(if {min},MINIFY=1 )REMAP='test.js=no-test.js'
-Rollup.rule = -include {@}.d$(\n){inherit}
-Rollup.up = build/rollup.config.js
-# Better to catch glaring bugs in node than in a browser...
-Rollup.oo = $(call testFor,{<})
-
-
 # JSToHTML(JS) : Create an HTML file that runs a JS module.
 #
 JSToHTML.inherit = Builder
