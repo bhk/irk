@@ -2,31 +2,31 @@ Current
 =======
 
  - Get functionality working:
-   - grid_demo: drag events (eventutils:captureDrag ?)
-   - player
    - svg
    - exposer
+   - player
 
- - i.js: When outside of any cell, memos are no-ops
- - i.js: Make "isolate" lightweight when a no-op (no child cells)
- - i.js: refactor...
+ - grid: create per-column factory for data cells
+ - drag: leverage `listen` from e.js?
+ - demo: Demo needn't/shoudn't be `posn: abs`
+ - demo: provide buttons for un-render / re-render
+ - I: When outside of any cell, memos are no-ops
+ - I: Make "isolate" lightweight when a no-op (no child cells)
+ - I: refactor...
     * Describe `memo`
     * defer(f, ...args)
          defer(_ => f(a,b))  <-->   defer(f, a, b)
     * Remove deferMemo
          deferMemo(f)(a,b)    -->   defer(memo(f), a,b)
- - i.js: Document "monitoring": "during execution of a cell, its accesses of
+ - I: Document "monitoring": "during execution of a cell, its accesses of
    other cells (inputs, intermediates) are logged."
 
- - e.js: Optimize setContent? (not re-populate all children?)
- - e.js: dereg listener on drop? [needed?]
+ - E: Optimize setContent? (not re-populate all children?)
+ - E: dereg listener on drop? [needed?]
  - Validate "clean" install using "npm update"
- - minion: {deps} should contribute to {needs} (?)
- - minion: add {depsCommand} and {depsFile}
-     depsCommand does not influence the output file (not incl. in vvValue)
- - minion: easy way to silence commands per-class?
 
-Notes
+
+For readme...
 =====
 
  * `$ npm update` installs dependencies.
@@ -47,3 +47,51 @@ Notes
 
  * `./test.js` is remapped to `./no-test.js` when bulding bundles for the
    browser.  With minification, this also discards embedded unit tests.
+
+
+Longer-term
+=====
+
+ * Ultimately we want a reactive FS veneer.  It should make it easy to avoid
+   race conditions & locking, or provide an alternative (temporary
+   duplication).  For example, changing a song title may require
+   modifying/inserting 20 bytes near the end of a 3MB file, but if the file
+   has been modified since our read, we could corrupt it.  In the imperative
+   model one has to deal with the same problems, but languages and libraries
+   in that model are ill-equipped to provide a generic solution to race
+   condition problem.
+
+ * PVS: View state that should persist beyond the lifetime of the view --
+   not part of the model (the data being viewed) and not part of the view
+   class (all instances).  [E.g.: column widths.]  Perhaps this could be
+   "automatically" arrived at by the view, based on its "location" -- that
+   is, where in the DOM tree it is rendered, and in which application.
+   Better yet, its location within an app would be determined more nicely by
+   non-DOM parent nodes that exist for addressing purposes.  The current
+   e.js model (creation of DOM nodes when views are created) means we cannot
+   know *where* we are in the tree until some unknown later point in time.
+
+ * wrap() optimized for constant case, so 'isolate(...demand(...))' is
+   efficient. [TODO: memo & onDrop; keep in mind fn vs. cell vs. invocation]
+
+      const g_cc = [];  // cell children
+
+      const isolate = (fn) => {
+         const ccn = g_cc.length;
+         const result = fn();
+         if (ccn != g_cc.length) {
+            g_cc[ccn] = new Cell(g_cc.slice(ccn, g_cc.length), result);
+            g_cc.length = ccn+1;
+         }
+         return result;   // nothing to do
+      }
+
+      class Cell {
+         // we do not know our parent at creation time...
+         constructor (children, result) {
+            this.children = children;
+            this.result = result;
+            this.parent = nullParent;
+            children.forEach(c => c.parent = cell);
+         }
+      }
