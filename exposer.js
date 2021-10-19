@@ -27,7 +27,7 @@
 // confoundingly uses the term "actual viewport" for the layout viewport(!)
 // and introduces another term, "initial viewport" (which is also not a
 // viewport).  Other W3C documents, like the CSSOM View Module, refer to
-// "viewport" quite ambiguously.  For example,
+// "viewport" quite ambiguously.
 //
 // The standards are far out of sync with implementations.
 //

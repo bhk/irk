@@ -211,6 +211,12 @@ class Element extends Node {
     get style() {
         return this._style;
     }
+
+    getBoundingClientRect() {
+        // we don't implement layout; return something reasonable
+        return {x: 0, y:0, width: 877, height: 780,
+                left: 0, top: 0, right: 877, bottom: 780};
+    }
 }
 
 //--------------------------------
