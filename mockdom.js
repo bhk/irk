@@ -19,7 +19,7 @@
 // <Style>.<propertyName>
 
 import test from "./test.js";
-let {eq, assert} = test;
+import assert from "assert";
 
 //--------------------------------
 // CSS classes
@@ -153,7 +153,7 @@ class Node {
         // support use case of removing all child nodes
         //TODO: assert(text === "");
         this._childNodes.splice(0, this._childNodes.length);
-        this._text = test;
+        this._text = text;
     }
 
     get childNodes() {
@@ -303,14 +303,18 @@ G.Element = Element;
 // quick self-test
 //--------------------------------
 
-const d = new Document();
-const styleElem = d.createElement("style");
-d.head.appendChild(styleElem);
-const sheet = d.styleSheets[d.styleSheets.length - 1];
+if (test) {
+    let {eq} = test;
 
-assert(sheet.cssRules instanceof Array);
+    const d = new Document();
+    const styleElem = d.createElement("style");
+    d.head.appendChild(styleElem);
+    const sheet = d.styleSheets[d.styleSheets.length - 1];
 
-eq(0, sheet.insertRule("p {}", 0));
-const r = sheet.cssRules[0];
+    assert(sheet.cssRules instanceof Array);
 
-eq(r.selectorText, "p");
+    eq(0, sheet.insertRule("p {}", 0));
+    const r = sheet.cssRules[0];
+
+    eq(r.selectorText, "p");
+}

@@ -1,28 +1,74 @@
 Alias(default).in = Alias(test)
-Alias(test).in = TestJS@tests
+Alias(test).in = TestJS@tests TestJSB@demos
+Alias(demo).in = JSToHTML@Bundle@demos
+Alias(index).in = Open(HTMLIndex(JSToHTML@Bundle@demos))
 
-tests = util_q.js i_q.js e_q.js grid_q.js grid_demo_q.js drag_demo_q.js
+tests = util_q.js i_q.js e_q.js grid_q.js
+demos = drag_demo.js grid_demo.js svg_demo.js exposer_demo.js
 
-testFor = $(patsubst %,TestJS(%),$(filter $(patsubst %.js,%_q.js,$1),$(tests)))
+# Use ESBuild for Bundle, and validate %_demo.js and %_q.js beforehand
+Bundle.inherit = ESBuild
+Bundle.oo = TestJSB({<}) \
+   $(patsubst %,TestJS(%),\
+      $(filter $(tests),$(patsubst %_demo.js,%_q.js,{<})))
+
+esbuild = ./node_modules/.bin/esbuild
 
 
-# TestJS(TEST) : Execute TEST Javascript file using node.
+# TestJSB(TEST) : Execute JavaScript file TEST after imprting mockdom.js.
 #
-# We use `--experimental-loader` to track implied deps.
+TestJSB.inherit = TestJS
+TestJSB.scriptArgs = build/import.js ../mockdom.js ../{<}
+
+
+#--------------------------------
+# Generic Classes
+#--------------------------------
+
+# HTMLIndex(FILES) : Create HTML index of FILES
 #
-TestJS.inherit = Builder
-TestJS.command = @{env} node {depsFlags} {<} && touch {@}
-TestJS.env = NODE_NO_WARNINGS=1 TestJS_MT={@}
-TestJS.depsFlags = --experimental-loader ./build/node-M.js
-TestJS.rule = -include {@}.d$(\n){inherit}
+HTMLIndex.inherit = Write
+HTMLIndex.outExt = .html
+HTMLIndex.oo = $(_args)
+HTMLIndex.links = $(call get,out,{ooIDs})
+define HTMLIndex.data
+  <!DOCTYPE html>
+  <style>
+    a $([[)
+      display: block; font: 32px sans-serif; margin: 32px;
+      text-decoration: none;
+    $(]])
+  </style>
+  $(foreach p,$(foreach i,{links},$(call _relpath,{@},$i)),
+    <a href="$p">$(notdir $(basename $p))</a>)
+endef
+
+# $(call _relpath,TO,FROM)
+_relpath = $(if $(filter /%,$2),$2,$(if $(filter ..,$(subst /, ,$1)),$(error _relpath: '..' in $1),$(or $(foreach w,$(filter %/%,$(word 1,$(subst /,/% ,$1))),$(call _relpath,$(patsubst $w,%,$1),$(if $(filter $w,$2),$(patsubst $w,%,$2),../$2))),$2)))
+
 
 # Demo(NAME): Shorthand that builds JSToHTML(Bundle(NAME_demo.js))
-# ODemo(NAME): Shorthand for Open(JSToHTML(Bundle(NAME_demo.js)))
 #
 Demo.inherit = Phony
 Demo.in = JSToHTML(Bundle($(_arg1)_demo.js))
+
+
+# ODemo(NAME): Shorthand for Open(Demo(NAME))
+#
 ODemo.inherit = Demo
 ODemo.in = Open({inherit})
+
+
+# TestJS(TEST) : Execute Javascript file TEST using node.
+#
+# We use `--experimental-loader` to track implied dependencies.
+#
+TestJS.inherit = Builder
+TestJS.command = {env} node {depsFlags} {scriptArgs} && touch {@}
+TestJS.env = @NODE_NO_WARNINGS=1 TestJS_MT={@}
+TestJS.depsFlags = --experimental-loader ./build/node-M.js
+TestJS.rule = -include {@}.d$(\n){inherit}
+TestJS.scriptArgs = {<}
 
 
 # Open(FILE) : Launch a browser/viewer on FILE
@@ -31,31 +77,39 @@ Open.inherit = Phony
 Open.command = open -a "Google Chrome" {<}
 
 
-# Bundle(SOURCE,[min:1]) : Bundle JavaScript SOURCE with its dependencies.
+# Bundle(SOURCE,[min:1])
 #
-Bundle.inherit = ESBuild
+#   Bundle JavaScript file SOURCE with its dependencies.  Minify if `min` is
+#   given.
+#
+Bundle.inherit ?= _Bundle
 
 
-# ESBuild(SOURCE,[min:1]) : Bundle with esbuild.
+# _Bundle(...) : Base class for Bundle() implementations.
 #
-ESBuild.inherit = Builder
-ESBuild.min = $(call _namedArgs,min)
-ESBuild.command = {bundleCmd}$(\n){depsCmd}
-ESBuild.bundleCmd = {exe} --outfile={@} {<} --bundle $(if {min},--minify) --metafile={@}.json --color=false --log-level=warning
-ESBuild.depsCmd = @node -p '(([k,v])=>k+": "+Object.keys(v.inputs).join(" "))(Object.entries(require("./{@}.json").outputs)[0])' > {depsFile}
+_Bundle.inherit = Builder
+_Bundle.min = $(call _namedArgs,min)
+
+
+# ESBuild(...) : See _Bundle
+#
+ESBuild.inherit = _Bundle
+ESBuild.command = {bundleCmd}$(\n)@{depsCmd}
+ESBuild.bundleCmd = @{exe} --outfile={@} {<} --bundle $(if {min},--minify) --metafile={@}.json --color=false --log-level=warning
+ESBuild.depsCmd = node -p '(([k,v])=>k+": "+Object.keys(v.inputs).join(" "))(Object.entries(require("./{@}.json").outputs)[0])' > {depsFile}
 ESBuild.rule = -include {depsFile}$(\n){inherit}
-ESBuild.exe = ./node_modules/.bin/esbuild
+ESBuild.exe = $(esbuild)
 ESBuild.depsFile = {@}.d
 ESBuild.vvValue = $(call _vvEnc,{bundleCmd},{@})
-# Better to catch glaring bugs in node than in a browser...
-ESBuild.oo = $(call testFor,{<})
+
+esbuild ?= $(error $$(esbuild) undefined)
 
 
 # JSToHTML(JS) : Create an HTML file that runs a JS module.
 #
 JSToHTML.inherit = Builder
-JSToHTML.outExt = .html
-JSToHTML.command = node {up<} {<} -o {@}
+JSToHTML.outExt = %.html
+JSToHTML.command = @node {up<} {<} -o {@}
 JSToHTML.up = build/js-to-html.js
 
 
@@ -89,7 +143,7 @@ else
   JSDeps.vvFile =
   JSDeps.command = \
      @printf '%b\n' '$(foreach i,{^},import "./$i"\n)' | \
-     $(ESBuild.exe) --bundle --metafile={@}.json --outfile=/dev/null \
+     $(esbuild) --bundle --metafile={@}.json --outfile=/dev/null \
         --color=false --log-level=warning && \
      node -p '"{var} := "+$(call jdfn,{@}.json)' > {@}
 
