@@ -230,11 +230,8 @@ const getUniqueName = (name) => {
         name = m[1] + nextNum++;
     }
     allNames.add(name);
+    onDrop(_ => allNames.delete(name));
     return name;
-};
-
-const releaseUniqueName = (name) => {
-    allNames.delete(name);
 };
 
 //------------------------------------------------------------------------
@@ -410,6 +407,12 @@ let setContent = (e, content) => {
 //   props: ElemProps
 //
 let splitProps = (esIn, propsIn) => {
+    if (propsIn == null) {
+        return [esIn, []];
+    }
+    if (typeof propsIn != "object") {
+        throw new Error("Bad `props` value");
+    }
     let es = {...esIn};
     let rules = [];
 
@@ -464,7 +467,6 @@ let createES = (esIn, props) => {
         let added = defineRules(rules, es.selector);
         // release allocated resources
         onDrop(_ => {
-            releaseUniqueName(className);
             deleteRules(added);
         });
     }
@@ -485,7 +487,7 @@ let createElem = (esIn, props, content) => {
         // sub-rule will override "#I0" as intended.
         attrs.id = attrs.id || getUniqueName("I0");
         defineRules(rules, "#" + attrs.id);
-    } else {
+    } else if (rules[0]) {
         // In the simple case we do not need a stylesheet rule.
         setStyleProperties(e.style, rules[0].decls);
     }
@@ -495,6 +497,13 @@ let createElem = (esIn, props, content) => {
     setListeners(e, events || []);
     return e;
 };
+
+
+let setProps = (e, props) => {
+    setStyleProperties(e.style, props);
+    setAttrs(e, props.$attrs || [], null);
+};
+
 
 // Construct a new factory function/object.
 //
@@ -516,4 +525,5 @@ export {
     E as default,
     E,
     setContent,
+    setProps,
 };

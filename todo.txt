@@ -1,10 +1,6 @@
 Current
 =======
 
- - Get functionality working:
-   - exposer
-   - player
-
  - grid: create per-column factory for data cells
  - drag: leverage `listen` from e.js?
  - demo: Demo needn't/shoudn't be `posn: abs`

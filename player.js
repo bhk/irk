@@ -1,38 +1,38 @@
 // player.js: Browser "main" script (takes ownership of BODY)
 
-import kfat from "kfat.js";
+import kfat from "../kfat/logparse/.crank/out/kfat.js";
 import newGrid from "./grid.js";
-import E from "./e.js";
-import * as I from "./i.js";
+import {E, setProps, setContent} from "./e.js";
+import {newState, deferMemo, demand, activate} from "./i.js";
 import {fmtTime, merge} from "./util.js";
-
 
 // Returns conduit holding input field contents.
 //
-const newInput = (attrs) => {
-    const textState = I.newState("");
-    const a = merge({type: "text"}, attrs);
-    const e = E.new("input", merge({
-        type: "text",
-        listeners: {
+const newInput = (props) => {
+    const textState = newState("");
+    const e = E({
+        $tag: "input",
+        $events: {
             input: (evt) => (textState.set(e.value), true),
         },
-    }, attrs));
+        ...props,
+        $attrs: {
+            type: "text",
+            ...(props.attrs || {}),
+        },
+    });
 
     const text = textState.get.bind(textState);
     return [e, text];
 };
 
-
 //----------------------------------------------------------------
 // Data
 //----------------------------------------------------------------
 
-
-const MAXSONGS = 9000;
+const MAXSONGS = 12000;
 
 const dir = (name) => (name.match(/(.*\/).*/) || [1,"."])[1];
-
 
 const songs = [];
 kfat.forEach(
@@ -50,14 +50,12 @@ kfat.forEach(
                             songs.push(rec);
                         }})})});
 
-
 const fields = {
     "desc": {label: "Title"},
     "length": {label: "Time", align: "right", fmt: fmtTime},
     "file": {label: "File"},
     "start": {label: "Offset", align: "right", fmt: fmtTime},
 };
-
 
 const columns = [
     {width:  26},
@@ -66,7 +64,6 @@ const columns = [
     {width:  60, key: "start"},
     {width: 300, key: "file"},
 ];
-
 
 function filterSongs(text) {
     if (text == "") {
@@ -85,45 +82,39 @@ function filterSongs(text) {
     return db;
 }
 
-
-const audioElem = E.new("audio", {
-    controls: "controls",
-    style: {
-        width: 480,
-        height: 31,
-        margin: 8,
-    }
+const audioElem = E({
+    $tag: "audio",
+    $attrs: { controls: "controls" },
+    width: 480,
+    height: 31,
+    margin: 8,
 });
-
 
 //----------------------------------------------------------------
 // Search input control
 //----------------------------------------------------------------
 
 let [srchElem, searchText] = newInput({
-    type: "search",
-    placeholder: "Search...",
-    style: {
-        position: "absolute",
-        boxSizing: "border-box",
-        left: 510,
-        top: 13,
-        width: 160,
-        height: 21,
+    position: "absolute",
+    boxSizing: "border-box",
+    left: 510,
+    top: 13,
+    width: 160,
+    height: 21,
+    $attrs: {
+        type: "search",
+        placeholder: "Search...",
     },
 });
-
 
 //----------------------------------------------------------------
 // Grid
 //----------------------------------------------------------------
 
-
-const db = I.deferMemo(_ => filterSongs(searchText()))();
-
+const db = deferMemo(_ => filterSongs(searchText()))();
 
 function rowClicked(n, _db) {
-    const db = I.demand(_db);
+    const db = demand(_db);
     const song = db[n];
     const file = song.path;
     const src = encodeURIComponent(song.path).replace(/%2[Ff]/g, "/");
@@ -133,7 +124,6 @@ function rowClicked(n, _db) {
     audioElem.play().then(_ => { audioElem.currentTime = song.start });
 }
 
-
 const main = () => {
     // TODO: newGrid takes opts; opts include `style`
     const gridElem = newGrid(columns, fields, db, rowClicked);
@@ -141,19 +131,15 @@ const main = () => {
     return [audioElem, srchElem, gridElem];
 }
 
-
 //----------------------------------------------------------------
 // Top
 //----------------------------------------------------------------
 
-
-I.activate(() => {
-    E.setAttrs(document.body, {
-        content: main(),
-        style: {
-            margin: 0,
-            background: "#f2f3f4",   // #f2f3f4 is Chrome audio controls BG
-            overflow: "hidden",
-        },
+activate(() => {
+    setProps(document.body, {
+        margin: 0,
+        background: "#f2f3f4",   // #f2f3f4 is Chrome audio controls BG
+        overflow: "hidden",
     });
+    setContent(document.body, main());
 });
