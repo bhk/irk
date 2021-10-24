@@ -5,7 +5,8 @@ Alias(index).in = Open(HTMLIndex(JSToHTML@Bundle@demos))
 Alias(player).in = ODemo(player.js)
 
 tests = util_q.js i_q.js e_q.js grid_q.js
-demos = drag_demo.js grid_demo.js svg_demo.js exposer_demo.js event_demo.js
+demos = e_demo.js drag_demo.js grid_demo.js \
+        svg_demo.js exposer_demo.js event_demo.js
 
 # Use ESBuild for Bundle, and validate %_demo.js and %_q.js beforehand
 Bundle.inherit = ESBuild
