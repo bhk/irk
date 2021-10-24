@@ -1,10 +1,12 @@
 Current
 =======
 
+ - uninstall global NPM packages
  - grid: create per-column factory for data cells
  - drag: leverage `listen` from e.js?
  - demo: Demo needn't/shoudn't be `posn: abs`
  - demo: provide buttons for un-render / re-render
+ - eventDemo/dragStream: capture vs. document listener
  - I: When outside of any cell, memos are no-ops
  - I: Make "isolate" lightweight when a no-op (no child cells)
  - I: refactor...

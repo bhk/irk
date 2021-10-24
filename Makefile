@@ -2,9 +2,10 @@ Alias(default).in = Alias(test)
 Alias(test).in = TestJS@tests TestJSB@demos
 Alias(demo).in = JSToHTML@Bundle@demos
 Alias(index).in = Open(HTMLIndex(JSToHTML@Bundle@demos))
+Alias(player).in = ODemo(player.js)
 
 tests = util_q.js i_q.js e_q.js grid_q.js
-demos = drag_demo.js grid_demo.js svg_demo.js exposer_demo.js
+demos = drag_demo.js grid_demo.js svg_demo.js exposer_demo.js event_demo.js
 
 # Use ESBuild for Bundle, and validate %_demo.js and %_q.js beforehand
 Bundle.inherit = ESBuild
@@ -47,13 +48,13 @@ endef
 _relpath = $(if $(filter /%,$2),$2,$(if $(filter ..,$(subst /, ,$1)),$(error _relpath: '..' in $1),$(or $(foreach w,$(filter %/%,$(word 1,$(subst /,/% ,$1))),$(call _relpath,$(patsubst $w,%,$1),$(if $(filter $w,$2),$(patsubst $w,%,$2),../$2))),$2)))
 
 
-# Demo(NAME): Shorthand that builds JSToHTML(Bundle(NAME_demo.js))
+# Demo(SOURCE): Shorthand that builds JSToHTML(Bundle(SOURCE))
 #
 Demo.inherit = Phony
-Demo.in = JSToHTML(Bundle($(_arg1)_demo.js))
+Demo.in = JSToHTML(Bundle($(_arg1)))
 
 
-# ODemo(NAME): Shorthand for Open(Demo(NAME))
+# ODemo(SOURCE): Shorthand for Open(Demo(SOURCE))
 #
 ODemo.inherit = Demo
 ODemo.in = Open({inherit})

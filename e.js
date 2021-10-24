@@ -401,6 +401,14 @@ let setContent = (e, content) => {
 //              of the resulting rule.
 //
 
+let defaultES = {
+    tag: "div",
+    ns: null,
+    attrs: {},
+    selector: "",
+    name: "E0",
+};
+
 // Extract components of a `props` value.
 //
 //   esIn: ElemState
@@ -413,6 +421,7 @@ let splitProps = (esIn, propsIn) => {
     if (typeof propsIn != "object") {
         throw new Error("Bad `props` value");
     }
+
     let es = {...esIn};
     let rules = [];
 
@@ -449,19 +458,28 @@ let splitProps = (esIn, propsIn) => {
                 decls[key] = value;
             }
         }
-        rules.push({selector, decls});
+        if (decls) {
+            rules.push({selector, decls});
+        }
     };
-    split(propsIn);
+    split(propsIn, null);
 
     return [es, rules];
 };
+
+if (test) {
+    let [es, rules] = splitProps(defaultES, {x: 1, "&.c":{y:2}});
+    test.eq(rules.length, 2);
+    test.eq(rules[0].selector, "&.c");
+    test.eq(rules[1].selector, null);
+}
 
 // Create a derived ElemState value
 //
 let createES = (esIn, props) => {
     let [es, rules] = splitProps(esIn, props);
 
-    if (rules.length > 1 || rules[0].decls) {
+    if (rules.length > 0) {
         let className = getUniqueName(es.name);
         es.selector = es.selector + "." + className;
         let added = defineRules(rules, es.selector);
@@ -473,37 +491,49 @@ let createES = (esIn, props) => {
     return es;
 };
 
-// Create a DOM element
+// Assign element attributes
 //
-let createElem = (esIn, props, content) => {
-    let [es, rules] = splitProps(esIn, props);
-    let {tag, ns, attrs, events, selector} = es;
+let setElem = (e, es, rules) => {
+    let {attrs, selector, events} = es;
 
-    let e = newElement(tag, ns);
-
-    if (rules[1]) {
-        // Selector patterns require a stylesheet rule.  In this case, we
-        // avoid using the element's style object, so that a "#I0:hover"
-        // sub-rule will override "#I0" as intended.
-        attrs.id = attrs.id || getUniqueName("I0");
-        defineRules(rules, "#" + attrs.id);
-    } else if (rules[0]) {
-        // In the simple case we do not need a stylesheet rule.
-        setStyleProperties(e.style, rules[0].decls);
+    if (rules[0]) {
+        if (rules[0].selector) {
+            // Selector patterns require a stylesheet rule, which requires a
+            // unique ID.  In this case, we entirely avoid using `e.style`
+            // so that "&:hover:{...}" styles (selector = "#I0:hover") will
+            // override element styles (selector = "#I0").
+            if (!attrs.id) {
+                attrs = {...attrs, id: getUniqueName("I0")};
+            }
+            defineRules(rules, "#" + attrs.id);
+        } else {
+            // Assert: rules.length == 1
+            // In the simple case we do not need a stylesheet rule.
+            setStyleProperties(e.style, rules[0].decls);
+        }
     }
 
     setAttrs(e, attrs, selector.replace(/\./g, " ").substr(1));
-    isolate(_ => setContent(e, content));
     setListeners(e, events || []);
     return e;
 };
 
-
+// Note: $ns and $tag have no effect, since `e` has already been created.
+//
 let setProps = (e, props) => {
-    setStyleProperties(e.style, props);
-    setAttrs(e, props.$attrs || [], null);
+    let [es, rules] = splitProps(defaultES, props);
+    setElem(e, es, rules);
 };
 
+// Create a DOM element
+//
+let createElem = (esIn, props, content) => {
+    let [es, rules] = splitProps(esIn, props);
+    let e = newElement(es.tag, es.ns);
+    setElem(e, es, rules);
+    isolate(_ => setContent(e, content));
+    return e;
+};
 
 // Construct a new factory function/object.
 //
@@ -513,13 +543,7 @@ let newFactory = (es) => {
     return f;
 };
 
-let E = newFactory({
-    tag: "div",
-    ns: null,
-    attrs: {},
-    selector: "",
-    name: "E0",
-});
+let E = newFactory(defaultES);
 
 export {
     E as default,
