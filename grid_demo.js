@@ -8,12 +8,6 @@ import {run, log} from "./demo.js";
 import newGrid from "./grid.js";
 import {merge} from "./util.js";
 
-const newButton = (text, onclick) =>
-      E({
-          $tag: "button",
-          $events: {click: onclick},
-      }, "# Entries");
-
 // Returns conduit holding input field contents.
 //
 const newInput = (style, text) => {
@@ -74,11 +68,6 @@ const columns = [
     {key: "6", width:  24},
 ];
 
-const notes = [
-    "Assert: Cannot resize first column; can resize others.",
-    "Assert: On mouseup, column sizes are updated",
-];
-
 const itemCount = newState(sampleEntries.length);
 
 run(_ => {
@@ -90,24 +79,22 @@ run(_ => {
     let entries = newInput({}, "# Entries...");
     let controls = [
         entries.e,
-        "Assert: Cannot resize first column; can resize others.",
-        "Assert: On mouseup, column sizes are updated",
+        "Verify: Cannot resize first column; can resize others.",
+        "Verify: On mouseup, column sizes are updated",
+        "Verify: Scrolling (set # entries high)",
+        "Verify: Click reports row number (and when scrolled)",
     ];
 
     let db = deferMemo(_ => {
         const a = [];
+        const k = Number(entries.value() || 30) || 0;
         const kSample = sampleEntries.length;
-        const k = Number(entries.value()) || kSample;
         for (let i = 0; i < k; ++i) {
             a.push(sampleEntries[i % kSample]);
         }
         return a;
     })();
     let subject = newGrid(columns, fields, db, rowClicked);
-
-    // for (let [c, result] of getCurrentNode().children) {
-    //     console.log("[" + String(c.f) + " -> " + result + "]");
-    // }
 
     return {subject, controls};
 });

@@ -2,7 +2,6 @@
 
 import E from "./e.js";
 import {handleDrag} from "./drag.js";
-// TODO: import {captureUtils} from "./eventutils.js";
 
 import {defer, demand, mostRecent, newState, onDrop} from "./i.js";
 
@@ -23,10 +22,12 @@ const rowHeight = 22;
 // and down (scrolling).
 //
 // We do this with grid layout: each cell is a child of the grid, and has
-// its own col/row position.  The grid can be moved up/down (e.g. by placing
-// inside an "overflow: scroll" element.  Separate "row" elements (for
-// even/odd background effects and pointer events) are children of the grid,
-// with column start at 1 and end at MAX.
+// its own col/row position.  In CSS grid layout, rows are not DOM elements.
+// We create "DataRow" elements as grid cells that span all columns to color
+// the background (for even/odd and selection) and provide pointer events.
+// Auto-placement is not used (it doesn't work with sparse on-demand
+// population of the grid, or with the DataRow elements spanning all
+// columns), so every data cell has a custom `grid-area` style.
 //
 // Scrolling: Data cells should scroll horiz & vert, but headers should move
 // only horiz.  Therefore, we have *two* grids (siblings), one for data
@@ -37,33 +38,27 @@ const rowHeight = 22;
 //     grid layout.  Each cell could be a child of a column element, and row
 //     elements being children of the first column, and columns being a
 //     child of a parent "grid" (which can be scrolled).
+//
 
 const GridBase = E.set({
     display: "grid",
-    gridAutoRows: rowHeight + "px",
+    gridAutoRows: rowHeight,
     font: "12px -apple-system, Helvetica, 'Lucida Grande', sans-serif",
-    userSelect: "none",
 });
 
 const DataGrid = GridBase.set({
     $name: "DataGrid",
     overflow: "scroll",         // scroll up/down (just data cells, not headers)
     position: "absolute",
-    top: 2,
+    top: rowHeight + 2,
     bottom: 0,
     left: 0,
     right: 0,
-});
-
-const DataRow = E.set({
-    $name: "DataRow",
-    gridArea: "1 / 1 / auto / -1",
-    "&.odd" : {
-        background: "#f3f3f3",
-    },
-    "&.selected": {
-        background: "rgba(180,200,255, 0.4)",
-    },
+    // paint odd/even pattern to data grid background
+    // Safari has problems with background-attachment
+    backgroundImage: "linear-gradient(transparent 50%, #0000000c 50%)",
+    backgroundSize: "auto " + rowHeight * 2 + "px",
+    backgroundAttachment: "local", // scroll with contents
 });
 
 const DataCell = E.set({
@@ -161,8 +156,8 @@ const Divider = E.set({
     borderColor: "white",
 });
 
-const Dragger = Divider.set({
-    $name: "Dragger",
+const DragDivider = Divider.set({
+    $name: "DragDivider",
     cursor: "col-resize",
 });
 
@@ -182,28 +177,18 @@ const GridTop = E.set({
     top: 0,
 });
 
-const newRowElement = (rowIndex) => DataRow({
-    gridRowStart: String(rowIndex),
-    $attrs: {
-        class: (rowIndex % 2 == 1 ? "odd" : ""),
-    },
-});
-
-const newCell = (value, fmt, align, rowIndex, colIndex) => DataCell({
-    textAlign: align || "",
-    gridArea: (rowIndex+2) + " / " + (colIndex+1),
-}, fmt ? fmt(value) : value);
+const newCell = (value, fmt, align, rowIndex, colIndex) => {
+    console.log("gridArea: " + (rowIndex+1) + " / " + (colIndex+1));
+    return DataCell({
+        textAlign: align || "",
+        gridArea: (rowIndex+1) + " / " + (colIndex+1),
+    }, fmt ? fmt(value) : value);
+};
 
 const createGridCells = (db, columns, fields) => {
     const o = [];
 
-    // blank row prior to top row (visible only during overscroll)
-    o.push(newRowElement(o, 1));
-
     db.forEach((rec, rowIndex) => {
-        // row element
-        o.push(newRowElement(rowIndex + 2));
-
         // cells for each column
         columns.forEach( (c, colIndex) => {
             if (c.key) {
@@ -231,7 +216,7 @@ const newColHeader = (fields, colInfo, colIndex) => {
         let dragDx = newState(0);
         let restWidth = newState(width);
         colWidth = defer(_ => dragDx.get() + restWidth.get());
-        eDivider = Dragger();
+        eDivider = DragDivider();
         let dereg = handleDrag(eDivider, {
             dragMove: (dx, dy) => {
                 dragDx.set(dx);
@@ -278,7 +263,7 @@ const newGrid = (columns, fields, db, fnRowClicked) => {
 
     // GridTop
     //    DataGrid
-    //      DataRow, DataCell
+    //      DataCell ...
     //    HdrGrid
     //      HdrCell ...
     //
@@ -303,10 +288,11 @@ const newGrid = (columns, fields, db, fnRowClicked) => {
                 hdrGrid.style.left = -dataGrid.scrollLeft + "px";
             },
             mousedown: (evt) => {
-                const rowLine = evt.target.style.gridRowStart;
-                if (rowLine > 1) {
+                let rowLine = Math.floor((evt.offsetY + evt.target.scrollTop)
+                                         / rowHeight);
+                if (rowLine >= 0) {
                     if (fnRowClicked) {
-                        fnRowClicked(rowLine-2, db);
+                        fnRowClicked(rowLine, db);
                     }
                 }
             },

@@ -1,8 +1,8 @@
 Current
 =======
 
- - uninstall global NPM packages
- - grid: create per-column factory for data cells
+ - grid: repeating background?
+ - grid: demo vertical & horizontal scrolling
  - drag: leverage `listen` from e.js?
  - demo: Demo needn't/shoudn't be `posn: abs`
  - demo: provide buttons for un-render / re-render
@@ -20,14 +20,14 @@ Current
 
  - E: Optimize setContent? (not re-populate all children?)
  - E: dereg listener on drop? [needed?]
- - E: $ns -> $attr:{ xmlns=... }
  - Validate "clean" install using "npm update"
 
 
-For readme...
+For README...
 =====
 
- * `$ npm update` installs dependencies.
+ * `$ npm update` installs dependencies, except github.com/bhk/minion,
+   which is expected at `./minion`.
 
  * FOO_q.js => test for FOO.js
    FOO_demo.js => interactive demo/test for FOO.js; view with `make index`
