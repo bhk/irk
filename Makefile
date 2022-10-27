@@ -9,7 +9,7 @@ Alias(demo).in = JSToHTML@Bundle@demos
 Alias(index).in = Open(HTMLIndex(JSToHTML@Bundle@demos))
 Alias(player).in = ODemo(player.js)
 
-tests = util_q.js i_q.js e_q.js grid_q.js
+tests = util_q.js i_q.js e_q.js grid_q.js rop_q.js
 demos = e_demo.js drag_demo.js grid_demo.js \
         svg_demo.js exposer_demo.js event_demo.js
 
