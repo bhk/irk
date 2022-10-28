@@ -466,52 +466,66 @@ In JS, testing equality (to detect changes) is problematic.
 The user must be aware of the approach used by the library, and the
 programming strategy it suggests.
 
-1) The library compares using `===` when checking validity of cells and
-   comparing arguments to wrapped functions.
+1) The library **interns** values passed in to wrapped functions, and values
+   returned from cells.  Comparing interned values with `===` is a robust
+   test for equality.
 
-   This gives exactly the intended results for `null`, `undefined`,
-   booleans, strings, and numbers (except for the bizarre edge cases of
-   foating point numbers, such as NaN !== NaN).
+   Interning converts Arrays and simple objects (those whose constructor is
+   `Object`) to a canonical, immutable (frozen) instance.  When the value
+   belongs to an inherently immutable type (string, number, etc.), the
+   result of interning is the same as the input.
 
-   However, this is not necessarily desirable for aggregates.
+   Complex objects (those with user-defined constructors) and functions are
+   not internable, so any two instances will be treated as unequal.
 
-2) The library provides interning mechanisms for JS aggregates.  When value
-   equivalence is relevant, the programmer can intern values and use the
-   result of interning.
+   For example, the following will leave `s` in a non-dirty state:
 
-      "x is equivalent to y" <=> "intern(x) === intern(y)."
+      s = newState([1,2,3]);
+      s.set([1,2,3]);
 
-   One advantage of this approach is that when two values are `===`, they
-   actually are the same, whereas if we have two "equivalent" values that
-   are not `===`, downstream code can distinguish them and behave
-   differently depending on which it is dealing with.
+   The immutability of canonicalized values helps avoid any mutation that
+   would invalidate our assumptions.
 
-3) Cells values essentially interned.
+   The canonicalization helps ensure that when we treat values as
+   equivalent, they are actually indistinguishable, so computed results
+   should be deterministic.
 
-4) Note that in the cased of local functions, a new function is constructed
-   every time the definition (or anonymous function expression) is
-   evaluated.  Use constant functions when equality is relevant.
+   While interning can be an expensive operation, it is always fast when
+   performed on a canonicalized instance.  In the case of canonical Arrays
+   and Objects, their elements and properties are also canonical.
 
-   Note that the requirements are transitive.  A function is not constant if
-   it calls (via a capture) a non-constant function.
+2) Use of non-internable values may result in too much recalculation (when
+   used in cell results) and in failure to re-use cells (when used as
+   parameters to wrapped functions).
+
+   Note that in the case of local functions, a new function is constructed
+   every time the function statement or expression is evaluated.  For
+   example, the following will leave `s` in a dirty state:
+
+      let ff = () => (x => x);
+      s = newState(ff());
+      s.set(ff());
+
+   To avoid this, use functions defined in a scope with a sufficiently long
+   lifetime.
+
+2) Also, of non-internable values may result in not enough recalculation
+   (when used in cell results) and in incorrect re-use of cells (when used
+   as parameters to wrapped functions).
+
+   This can happen because of the mutability of these values.  When a value
+   changed after being used as a cell result or input, it might still be
+   treated as "the same" on a later update cycle, even though it is not.
+
+   To avoid these problems, use "constant" functions (those who do not
+   reference captures that are mutated) and constant data structures (those
+   that are not mutated by your program) when equality is relevant.  Note
+   that the requirements are transitive.  A function is not constant if it
+   calls (via a capture) a non-constant function.
 
    (The library's public API functions can be excluded from this analysis;
    while they may read and write global variables they are specially
    constructed to insulate cell functions from nondeterminism.)
-
-5) Mutation of data structure or variables that are referenced by functions
-   can break assumptions of equality.
-
-   The programmer must avoid mutating (directly or indirectly) any value
-   that has been compared for equivalence by the libary -- namely cell
-   results and wrapped function arguments.
-
-   We may modify members of an object as long as those members are never
-   inspected by any other cells.  For example, this is used when we create
-   DOM elements and later modify them (without re-constructing them).
-   Subsequent re-evaluations may modify the DOM element, but this cannot
-   result in inconsistency because these changes do not affect the behavior
-   of any downstream cells.
 
 
 ### JavaScript Root Context

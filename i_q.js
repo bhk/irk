@@ -5,7 +5,7 @@ let {eq, assert} = test;
 import {
     defer, use, isThunk, wrap, useError, usePending, checkPending, Pending,
     rootCause, newState, newCell, onDrop, activate, latch,
-    getCurrentCell, createCellKey, logCell
+    getCurrentCell, logCell
 } from "./i.js";
 
 let root = getCurrentCell();
@@ -22,16 +22,6 @@ eq(ff, use(ff));
 eq(true, isThunk(defer(_ => 2)));
 eq(2, use(defer(_ => 2)));
 eq(ff, use(defer(_ => ff)));
-
-// createCellKey
-
-assert(createCellKey(1, []) != createCellKey(2, []));
-assert(createCellKey(1, []) != createCellKey(1, [2]));
-assert(createCellKey(1, [2]) != createCellKey(1, [2,3]));
-assert(createCellKey(1, [2]) == createCellKey(1, [2]));
-assert(createCellKey(1, [null]) != createCellKey(1, [undefined]));
-assert(createCellKey(1, [undefined]) != createCellKey(1, []));;
-assert(createCellKey(1, [undefined]) == createCellKey(1, [undefined]));;
 
 // test Cell, newState, newCell, onDrop
 

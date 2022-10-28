@@ -28,6 +28,8 @@
 //    mostRecent(stream, initial)
 //
 
+import {intern} from "./intern.js";
+
 const assert = (cond) => {
     if (!cond) {
         throw new Error("Assertion failed");
@@ -37,20 +39,6 @@ const assert = (cond) => {
 const cache = (map, key, fn) => {
     let v;
     return map.has(key) ? map.get(key) : (v = fn(), map.set(key, v), v);
-};
-
-//------------------------------------------------------------------------
-// Map a function and argument array to a unique value.
-//------------------------------------------------------------------------
-
-const gRootKey = new Map();
-
-const findMap = (map, key) => cache(map, key, () => new Map());
-
-const createCellKey = (f, args) => {
-    let map = findMap(gRootKey, f);
-    args.forEach(a => map = findMap(map, a));
-    return map;
 };
 
 //------------------------------------------------------------------------
@@ -218,10 +206,11 @@ class Cell extends Thunk {
 
 class StateCell extends Cell {
     constructor(initial) {
-        super(initial, false);
+        super(intern(initial), false);
     }
 
     set(value) {
+        value = intern(value);
         if (value !== this.result) {
             this.result = value;
             this.setDirty();
@@ -397,7 +386,7 @@ class FunCell extends Cell {
         const saveCurrentCell = currentCell;
         currentCell = this;
         try {
-            this.result = this.f.apply(null, this.args);
+            this.result = intern(this.f.apply(null, this.args));
         } catch (e) {
             this.result = new CellException(e);
         }
@@ -419,7 +408,8 @@ class FunCell extends Cell {
 // Find a matching cell or create a new one.
 //
 const findCell = (f, args) => {
-    const key = createCellKey(f, args);
+    args = intern(args);
+    const key = intern([f, args]);
     return cache(cellCache, key, () => new FunCell(f, args, key));
 }
 
@@ -715,7 +705,6 @@ export {
 
     // for testing & diagnostics
     getCurrentCell,
-    createCellKey,
     logCell,
     valueText,
 };
