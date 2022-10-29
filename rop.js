@@ -32,15 +32,15 @@
 //
 
 import {
-    use, onDrop, wrap, activate, Pending, usePending,
-    newState, newCell, getCurrentCell, valueText,
+    use, onDrop, wrap, activate, Pending, rootCause,
+    newState, valueText,
 } from "./i.js";
 
 // Protect against pollution of global namespace.  This module should work
 // in Node (without MockDom.js) where WebSocket is not a global.
-let WebSocket = null;
+const WebSocket = null;
 
-let assert = (cond, desc) => {
+const assert = (cond, desc) => {
     if (!cond) {
         throw new Error(desc || "FAILED");
     }
@@ -64,8 +64,8 @@ class Pool extends Array {
         if (this.nextEmpty != null) {
             ndx = this.nextEmpty;
             this.nextEmpty = this[ndx];
-            this[ndx] = null;
         }
+        this[ndx] = null;
         return ndx;
     }
 
@@ -76,7 +76,7 @@ class Pool extends Array {
     }
 
     add(value) {
-        let ndx = this.alloc();
+        const ndx = this.alloc();
         onDrop(() => {
             this.free(ndx);
         });
@@ -92,6 +92,24 @@ const wsCLOSING = 2;
 const wsCLOSED = 3;
 
 //----------------------------------------------------------------
+// Value encoding
+//----------------------------------------------------------------
+
+const makeEncoder = toOID => {
+    const replacer = (k, v) =>
+          typeof v == "function" ? {"%F": toOID(v)} : v;
+    return value => JSON.stringify(value, replacer);
+};
+
+const makeDecoder = fromOID => {
+    const restorer = (k, v) =>
+          typeof v == "object" && v["%F"] != null
+          ? fromOID(v["%F"])
+          : v;
+    return str => JSON.parse(str, restorer);
+};
+
+//----------------------------------------------------------------
 // Agent
 //----------------------------------------------------------------
 
@@ -100,92 +118,125 @@ const ropUPDATE = "Update";         // slot value     [response]
 const ropCLOSE = "Close";           // slot
 const ropACKCLOSE = "AckClose";     // slot           [response]
 const ropACKUPDATE = "AckUpdate";   // slot
-
-let countRemotes = 0;
+const ropERROR = "Error";           // name
 
 class Agent {
-    // slot state changes:
-    //   a) closed -> open:  send Open
-    //   b) receive Update:  modify state; send Ack
-    //   c) onDrop:          send Close
-
     constructor(ws, initialFuncs) {
-        this.slotsOut = new Pool();
-        this.slotsIn = [];
+        // observers = outbound = state cells waiting on responses
+        this.observers = new Pool();
+
+        // updaters = inbound = cells invoking local functions  (inbound)
+        this.updaters = [];
+
+        // caps = local functions currently accessible by peer
         this.caps = new Pool();
-        for (let f of initialFuncs || []) {
+        for (const f of initialFuncs || []) {
             this.caps[this.caps.alloc()] = f;
         }
-
-        this.ws = ws;
-        this.sendQueue = [];
 
         // We must re-use forwarders and observations, or else callers will
         // continually recalc, getting a new observation each time.  We can
         // wrap these at construction time, since these lifetime of the
         // wrapped forms exceeds the time when they can be called.
         this.observe = wrap(this.observe_.bind(this)).cell;
+
         // getRemote() returns an ordinary value; there is no PENDING/ERROR
         // state involved to no reason to return a cell.
         this.getRemote = wrap(this.getRemote_.bind(this));
 
+        this.encode = makeEncoder(this.toOID.bind(this));
+        this.decode = makeDecoder(this.fromOID.bind(this));
+
+        this.sendQueue = [];
+        this.attach(ws);
+    }
+
+    attach(ws) {
+        this.ws = ws;
         ws.onopen = (evt) => {
             // this.log(`onopen`);
-            for (let msg of this.sendQueue) {
+            for (const msg of this.sendQueue) {
                 // this.log(`send ${msg}`);
                 this.ws.send(msg);
             }
             this.sendQueue = [];
         };
 
-        ws.onerror = (evt) => console.log("Agent: error", evt);
+        ws.onerror = (evt) => {
+            this.shutdown("socket error");
+        };
 
         // onmessage: MessageEvent -> void
         ws.onmessage = (evt) => {
-            if (this.log) {
-                this.log(`recv ${evt.data}`);
+            this.log && this.log(`recv ${evt.data}`);
+            const msg = this.decode(evt.data);
+            if (!(msg instanceof Array)) {
+                return this.shutdown("malformed");
             }
-            let [type, slot, ...args] = JSON.parse(evt.data);
+            const [type, slot, ...args] = msg;
             (type == ropOPEN      ? this.onOpen(slot, ...args) :
              type == ropUPDATE    ? this.onUpdate(slot, ...args) :
              type == ropACKUPDATE ? this.onAckUpdate(slot) :
              type == ropCLOSE     ? this.onClose(slot) :
              type == ropACKCLOSE  ? this.onAckClose(slot) :
+             type == ropERROR     ? this.shutdown("received Error") :
              assert(false, `Unknown message type ${type}`));
         };
     }
 
-    onOpen(slot, oid, ...wireArgs) {
-        let args = wireArgs.map(value => this.decode(value));
-        let fn = this.caps[oid];
+    reportError(reason) {
+        this.send(ropERROR, reason);
+    }
+
+    shutdown(reason) {
+        this.log && this.log(`shutdown ${reason}`);
+        this.ws.close();
+    }
+
+    onOpen(slot, oid, ...args) {
+        const fn = this.caps[oid];
         assert(typeof fn == "function");
-        assert(this.slotsIn[slot] == null);
-        let callCell = newCell(_ => use(fn(...args)));
-        callCell.id = "updCall";
-        let updCell = activate(() => {
-            let [done, result] = usePending(callCell);
-            result = done ? result : "PENDING:" + result;
-            this.send(ropUPDATE, slot, this.encode(result));
+        assert(this.updaters[slot] == null);
+        const updater = activate(() => {
+            let result;
+            try {
+                result = [0, use(fn(...args))];
+            } catch (e) {
+                const cause = rootCause(e);
+                if (cause instanceof Pending) {
+                    result = [1, cause.value];
+                } else {
+                    result = [2, cause.message || cause];
+                }
+            }
+            this.send(ropUPDATE, slot, ...result);
         });
-        updCell.name = "inbound";
-        this.slotsIn[slot] = updCell;
+        updater.name = "inbound";
+        this.updaters[slot] = updater;
     }
 
     onClose(slot) {
-        let cell = this.slotsIn[slot];
-        cell.deactivate();
-        this.slotsIn[slot] = null;
+        const updater = this.updaters[slot];
+        updater.deactivate();
+        this.updaters[slot] = null;
         this.send(ropACKCLOSE, slot);
     }
 
-    onUpdate(slot, value) {
-        let r = this.slotsOut[slot];
-        value = this.decode(value);
-        if (r instanceof Object) {
+    onUpdate(slot, err, value) {
+        const observer = this.observers[slot];
+        if (observer instanceof Object) {
             // this.log(`r[${slot}] = ${value}`);
-            r.set(value);
+            if (err == 0) {
+                observer.set(value);
+            } else {
+                observer.setError(err == 1 ? new Pending(value) : value);
+            }
+        } else if (observer == "ZOMBIE") {
+            // OK: still waiting on Close
         } else {
-            console.log(`Agent: bogus slot ${slot}`);
+            // protocol error
+            this.reportError("bad slot");
+            this.shutdown("bad slot");
         }
         this.send(ropACKUPDATE, slot);
     }
@@ -194,22 +245,20 @@ class Agent {
     }
 
     onAckClose(slot) {
-        assert(this.slotsOut[slot] == "ZOMBIE");
-        this.slotsOut.free(slot);
+        assert(this.observers[slot] == "ZOMBIE");
+        this.observers.free(slot);
     }
 
     send(type, slot, ...args) {
-        let msg = JSON.stringify([type, slot, ...args]);
+        const msg = this.encode([type, slot, ...args]);
         if (this.ws.readyState == wsOPEN) {
-            // this.log(`send ${msg}`);
+            this.log && this.log(`send ${msg}`);
             this.ws.send(msg);
         } else if (this.ws.readyState == wsCONNECTING) {
-            if (this.log) {
-                this.log(`post ${msg}`);
-            }
+            this.log && this.log(`post ${msg}`);
             this.sendQueue.push(msg);
         } else {
-            console.log(`Agent: bad state ${this.ws.readyState}`);
+            throw new Error(`send in bad state: ${this.ws.readyState}`);
         }
     }
 
@@ -225,48 +274,30 @@ class Agent {
                 : assert(this.caps[oid]));    // local  (non-neg => recipient)
     }
 
-    encode(v) {
-        return (v instanceof Array ? [v.map(x => this.encode(x))] :
-                typeof(v) == "function" ? [this.toOID(v)] :
-                v);
-    }
-
-    decode(v) {
-        return (!(v instanceof Array) ? v :
-                typeof v[0] == "number" ? this.fromOID(v[0]) :
-                v[0].map(x => this.decode(x)));
-    }
-
     // Begin a new observation
     observe_(oid, ...args) {
         // this.log("open ..");
-        let slot = this.slotsOut.alloc();
+        const slot = this.observers.alloc();
 
-        getCurrentCell().id = `R${oid}(${slot})`;  // debugging
-
-        let r = newState();
-        r.setError(new Pending("opening"));
-        this.slotsOut[slot] = r;
+        const observer = newState();
+        observer.setError(new Pending("opening"));
+        this.observers[slot] = observer;
 
         // package args
-        // let xargs = this.encodeArgs(args);
-
-        let wireArgs = args.map(value => this.encode(value));
-        this.send(ropOPEN, slot, oid, ...wireArgs);
+        this.send(ropOPEN, slot, oid, ...args);
 
         onDrop(() => {
-            this.slotsOut[slot] = "ZOMBIE";
+            this.observers[slot] = "ZOMBIE";
             this.send(ropCLOSE, slot);
         });
-        return r;
+        return observer;
     };
 
     getRemote_(oid) {
         // Remote functions are per (agent, oid, args)
         // (...args) -> cell
-        let fwdr = (...args) => {
+        const fwdr = (...args) => {
             // this.log && this.log(`evoke _o(${oid},${args.map(valueText)})`);
-            //  & this.observe(oid, ...args)
             return this.observe(oid, ...args);
         };
         fwdr.$OID = oid;
@@ -277,4 +308,7 @@ class Agent {
 export {
     Agent,
     Pool,
+    // for testing
+    makeEncoder,
+    makeDecoder,
 }

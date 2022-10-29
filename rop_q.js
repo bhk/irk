@@ -1,69 +1,40 @@
-import { Agent, Pool } from "./rop.js";
 import { connect, flushEvents } from "./mockdom.js";
-import test from "./test.js";
-import assert from "assert";
 import {
-    use, wrap, useError, usePending, Pending, checkPending,
-    newCell, newState, logCell, getCurrentCell, valueText
+    use, wrap, activate, useError, usePending, Pending, checkPending,
+    newCell, newState, logCell, getCurrentCell
 } from "./i.js";
-let { eq, eqAt, printf } = test;
+import { Agent, Pool, makeEncoder, makeDecoder } from "./rop.js";
+import test from "./test.js";
+const { assert, eq, eqAt } = test;
 
-let isPending = (value) => use(value) == "PENDING";
+//----------------------------------------------------------------
+// Utilities
+//----------------------------------------------------------------
 
-// TODO:
-//  - treat Pending as error state, not "PENDING"
-//     - enable `isError` detection without "use"
-//  - propagate error state through tunnel
-//  - deal with protocol errors
-//  - identify constant results
-//  - connection authentication
-//  - connection re-establishment (?)
-//  - object passing (to another tunnel)
-//  - test ping [validation; profiling]
+const newLogger = (prefix) => (...a) => console.log(prefix + ":", ...a);
+const log = newLogger("rop_q");
+const clog = (cell, opts) => logCell(cell, {...opts, log});
 
-// In Rio, ignoring the time for events to "settle", we would write ...
-//
-//     f = clientAgent.getRemote(0)
-//     assert f(1,2) == 3
-//
-// ... but in JS we work in the reactive domain and the imperative domain,
-// and in testing we deal with event loop simulation:
-//
-//  - Some functions expect to be called in the reactive domain (i.e.
-//    "inside" a "current cell").  We have to create a root cell and enter
-//    it with use(cell) or activate(cell).
-//
-//  - Some values are represented as cells, so we have to call `use()`
-//    if we want a raw value.
-//
-//  - `flushEvents` dispatches events from the simulated event queue.
-//
-
-let newLogger = (prefix) => (...a) => console.log(prefix + ":", ...a);
-let log = newLogger("rop_q");
-let clog = (cell, opts) => logCell(cell, {...opts, log});
-
-let flushEQ = (root, value) => {
+const flushEQ = (cell, value) => {
     flushEvents();
-    eqAt(2, root.result, value);
+    eqAt(2, cell.result, value);
 };
 
 // Invoke fn(...args) in a cell, returning:
 //   [false, pendingValue] if in progress
 //   [true, result] if complete
 //
-let pcell = (fn, ...args) => {
-    let inner = newCell(fn, ...args);
-    let c = newCell(() => usePending(inner));
-    c.name = "pcell";
-    use(c);
-    return c;
+const pcell = (fn, ...args) => {
+    const inner = newCell(fn, ...args);
+    inner.name = "pcell";
+    return activate(() => usePending(inner));
 };
 
-let logRecalc = () => {
-    let r = getCurrentCell();
-    let rr = r.recalc.bind(r);
-    r.recalc = () => { clog(); rr(); }
+// trap recalc of current cell, logging its state
+const logRecalc = () => {
+    const cell = getCurrentCell();
+    const oldRecalc = cell.recalc.bind(cell);
+    cell.recalc = () => (clog(), oldRecalc());
 };
 
 //----------------------------------------------------------------
@@ -73,103 +44,139 @@ let logRecalc = () => {
 // test Pool
 
 {
-    let p = new Pool();
+    const p = new Pool();
     eq(p.alloc(), 0);
-    eq(p.countUsed, 1);
-    p.free(0);
-    eq(p.nextEmpty, 0);
-    eq(p.countUsed, 0);
-    eq(p.alloc(), 0);
-    eq(p.countUsed, 1);
-
-    let cell = newCell(() => p.add(9));
-    let ndx = use(cell);
-    eq(p[ndx], 9);
+    eq(p.alloc(), 1);
     eq(p.countUsed, 2);
-    cell.deactivate();
+    p.free(0);
+    p.free(1);
+    eq(p.countUsed, 0);
+
+    eq(p.alloc(), 1);
     eq(p.countUsed, 1);
+    p.free(1);
+    eq(p.countUsed, 0);
+
+    // ASSERT: added index is automatically freed when cell is dropped
+    const cell = newCell(() => p.add(9));
+    const ndx = use(cell);
+    eq(p[ndx], 9);
+    eq(p.countUsed, 1);
+    cell.deactivate();
+    eq(p.countUsed, 0);
+}
+
+// test encode
+
+{
+    const pool = new Pool();
+    const encode = makeEncoder(f => pool.add(f));
+    const decode = makeDecoder(n => pool[n]);
+
+    const cell = activate(() => {
+        const v = [1, "abc", log, {a:1}];
+        const ev = encode(v);
+        eq(ev, '[1,"abc",{"%F":0},{"a":1}]');
+        eq(pool[0], log);
+        eq(pool.countUsed, 1);
+
+        eq(decode(ev), v);
+    });
+    cell.deactivate();
+    eq(pool.countUsed, 0);
 }
 
 // test Agent
 
-let wsClient = new WebSocket();
-let wsServer = new WebSocket();
+const wsClient = new WebSocket();
+const wsServer = new WebSocket();
 
 // client agent is constructed with ws in CONNECTING state
-let ca = new Agent(wsClient);
+const ca = new Agent(wsClient);
 // ca.log = newLogger("CAgent");
 connect(wsServer, wsClient);
 flushEvents();
 
 // we construct the server agent with ws in OPEN state
-let serverState1 = newState("initial");
-let serverFuncs = {
+const serverState1 = newState();
+const serverFuncs = {
     add: (x, y) => x + y,
     state: () => serverState1,
     funcTest: (fa, fb) => ["ok", fa, fb, use(fa()) + use(fb())],
 };
-let sa = new Agent(wsServer, Object.values(serverFuncs));
+const sa = new Agent(wsServer, Object.values(serverFuncs));
 // sa.log = newLogger("SAgent");
-let remote = (name) =>
+const remote = (name) =>
     ca.getRemote(Object.keys(serverFuncs).indexOf(name));
 
 // test: observe simple remote function (simple, non-reactive)
 
 {
-    let frAdd = remote("add");
-    let cell = pcell(frAdd, 1, 2);
+    const frAdd = remote("add");
+    const cell = pcell(frAdd, 1, 2);
     eq([false, "opening"], use(cell));
     flushEQ(cell, [true, 3]);
-    eq(ca.slotsOut.countUsed, 1);
+    eq(ca.observers.countUsed, 1);
     cell.deactivate();
     flushEvents();
-    eq(ca.slotsOut.countUsed, 0);
+    eq(ca.observers.countUsed, 0);
 }
 
 // test: observe remote state cell
 
 {
-    let f1 = remote("state");
-    let cell = pcell(() => f1());
-    flushEQ(cell, [true, "initial"]);
+    serverState1.set("a");
+    const cell = activate(() => useError(remote("state")()));
 
-    eq(ca.slotsOut.countUsed, 1);
-    eq(sa.slotsIn[0] == null, false);
+    // ASSERT: observing cell is created on server side
+    flushEQ(cell, [true, "a"]);
+    eq(ca.observers.countUsed, 1);
+    eq(sa.updaters[0] == null, false);
     eq(serverState1.parents.size, 1);
 
+    // ASSERT: update propagates
     serverState1.set(7);
     flushEQ(cell, [true, 7]);
+
+    // ASSERT: pending state propagates to client side
+    serverState1.setError(new Pending("stalled"));
+    flushEQ(cell, [false, new Pending("stalled")]);
+
+    // ASSERT: other errors propagate to client side (message only)
+    serverState1.setError("broken");
+    flushEQ(cell, [false, "broken"]);
+    serverState1.setError(new Error("ebroken"));
+    flushEQ(cell, [false, "ebroken"]);
+
+    // ASSERT: observation is closed and resources are cleaned up
+    serverState1.set("ok");
     cell.deactivate();
     flushEvents();
-
     eq(serverState1.parents.size, 0);
-    eq(ca.slotsOut.countUsed, 0);
-    eq(sa.slotsIn[0], null);
+    eq(ca.observers.countUsed, 0);
+    eq(sa.updaters[0], null);
 }
 
-// test: function args, results, and invocation of forwarders
+// test: marshaling functions
 
 {
     serverState1.set("xyz");
-    let ncc = ca.caps.countUsed;
-    let ncs = sa.caps.countUsed;
+    const ncc = ca.caps.countUsed;
+    const ncs = sa.caps.countUsed;
 
-    let localFunc = () => "abc";
+    const localFunc = () => "abc";
 
-    let cell = pcell(() => {
-        let rmtState = remote("state");
-        let rmtTest = remote("funcTest");
-        let result = use(rmtTest(localFunc, rmtState));
-        if (typeof result == "string") {
-            throw new Pending(result);
-        }
+    const cell = pcell(() => {
+        const rmtState = remote("state");
+        const rmtTest = remote("funcTest");
+        const result = use(rmtTest(localFunc, rmtState));
         assert(result instanceof Array);
-        let [ok, localFuncOut, rmtStateOut, catOut] = result;
+        const [ok, localFuncOut, rmtStateOut, catOut] = result;
         eq(ok, "ok");
         // ASSERT: localFunc is unwrapped on return
         eq(localFuncOut, localFunc);
         // ASSERT: remote function is equivalent after round trip
-        let st = use(rmtStateOut());
+        const st = use(rmtStateOut());
         eq(catOut, "abc" + st);
         return st;
     });
@@ -177,15 +184,13 @@ let remote = (name) =>
     eq(use(cell), [false, "opening"]);
 
     flushEQ(cell, [true, "xyz"]);
-    eq(sa.caps.countUsed, ncs+1);
-    eq(ca.caps.countUsed, ncc+1);
+
     serverState1.set("def");
     flushEQ(cell, [true, "def"]);
 
-    // check that caps[] entries (allocated OIDs) are freed
+    // ASSERT: observation is closed and resources are freed
     cell.deactivate();
     flushEvents();
     eq(sa.caps.countUsed, ncs);
-
     eq(ca.caps.countUsed, ncc);
 }
