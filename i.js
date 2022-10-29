@@ -2,22 +2,42 @@
 //
 // High-level API: Used by functional code
 //
-//    defer(f)             Construct a thunk (lazy value)
-//    demand(v)            Extract value from thunk (if a thunk)
-//    isThunk(v)           Return true if `v` is a thunk
-//    memo(f)(...args)     Decouple evaluation of f(...args), memoizing
-//    deferMemo(f)(...a)   Equivalent to defer(_ => memo(f)(...args))
-//    latch(v, fn)         Compute value from previous value.
+//    defer(f)            Construct a thunk (lazy value)
+//    use(v)              Extract value from cell or thunk
+//    isThunk(v)          Return true if `v` is a thunk or cell
+//    wrap(f)(...)        Evaluate f(...) inside a cell
+//    wrap(f).cell(...)   Return the cell that evaluates f(...)
+//    useError(c)         Return [succeeded, result/thrownvalue]
+//    usePending(c)       Return [done, result/pendingvalue]
+//    Pending             A class describes temporary failures
+//    checkPending(e)     value, if root cause of `e` was `new Pending(value)`
+//    rootCause(e)        Dereference `cause` in Error objects, transitively
 //
 // Low-level API: Used by imperative code
 //
-//    onDrop(f)            Register f() to perform cleanup
-//    newState()
-//    newRoot()
-//    activate()
-//    inRoot()
-//    isolate(f)           Decouple evaluation of f(), without memoizing
+//    newState()          Create new state cell
+//    newCell()           Create new function cell
+//    onDrop(f)           Call f() when current cell's value is discarded
+//    activate(f)         Decouple evaluation of f(), without memoizing
+//
+// Experimental:
+//
+//    latch(v, fn)
+//    newStream()
+//    filterStream(stream, xform)
+//    mostRecent(stream, initial)
+//
 
+const assert = (cond) => {
+    if (!cond) {
+        throw new Error("Assertion failed");
+    }
+};
+
+const cache = (map, key, fn) => {
+    let v;
+    return map.has(key) ? map.get(key) : (v = fn(), map.set(key, v), v);
+};
 
 //------------------------------------------------------------------------
 // Map a function and argument array to a unique value.
@@ -25,44 +45,49 @@
 
 const gRootKey = new Map();
 
+const findMap = (map, key) => cache(map, key, () => new Map());
 
-const findMap = (map, key) => {
-    let m = map.get(key);
-    if (m == null) {
-        m = new Map();
-        map.set(key, m);
-    }
-    return m;
-}
-
-
-const createNodeKey = (f, args) => {
+const createCellKey = (f, args) => {
     let map = findMap(gRootKey, f);
     args.forEach(a => map = findMap(map, a));
     return map;
-}
-
+};
 
 //------------------------------------------------------------------------
-// CaughtError
+// Exceptions
 //------------------------------------------------------------------------
 
+// CellException is used to distinguish a cell in error state from all
+// other possible cell values.
 
-class CaughtError {
-    constructor(e) {
-        this.e = e;
+class CellException {
+    constructor(error) {
+        this.error = error;
     }
 }
 
+// A Pending object is thrown to indicate that an failure is temporary.
+//
+//  A) throw new Pending("connecting");
+//  B) throw new Error("pending", { cause: Pending("connecting") });
+//  C) stateCell.setError(Pending("connecting"));
+//
+// (B) will generate a stack trace for the `throw` expression, while (A)
+// will not.  (C) will generate an error (and stack trace) when the state
+// cell is used.
+//
+class Pending {
+    constructor(value) {
+        this.value = value;
+    }
+}
 
 //------------------------------------------------------------------------
 // Thunk & FnThunk
 //------------------------------------------------------------------------
 
-
 class Thunk {
 }
-
 
 class FnThunk extends Thunk {
     constructor(f) {
@@ -75,80 +100,96 @@ class FnThunk extends Thunk {
     }
 }
 
-
-// Create a thunk that will be unwrapped by `demand`.
+// Create a thunk that will be unwrapped by `use`.
 //
 const defer = (f) => new FnThunk(f);
 
-
-// If value is a thunk, evaluate it.  Otherwise, return it.
+// Force evaluation of a value.
 //
-const demand = (value) => {
+const unthunk = (value) => {
     while (value instanceof Thunk) {
         value = value.get();
     }
     return value;
-}
+};
 
+const rootCause = (e) => {
+    while (e instanceof Error && e.cause) {
+        e = e.cause;
+    }
+    return e;
+};
+
+// Recover `value` if error resulted from `throw new Pending(value)`
+//
+const checkPending = (error) => {
+    const cause = rootCause(error);
+    if (cause instanceof Pending) {
+        return cause.value;
+    }
+};
+
+// Force evaluation and throw if value is in error state.
+//
+const use = (value) => {
+    value = unthunk(value);
+    if (value instanceof CellException) {
+        throw new Error("used error value", {cause: value.error});
+    }
+    return value;
+};
+
+// Return [true, RESULT] or [false, THROWNVALUE]
+//
+const useError = (value) => {
+    const v = unthunk(value);
+    return (v instanceof CellException
+            ? [false, rootCause(v.error)]
+            : [true, v]);
+};
+
+// Return [true, RESULT] or [false, PENDINGVALUE]  (rethrow other errors)
+//
+const usePending = (value) => {
+    const v = unthunk(value);
+    const p = v instanceof CellException && checkPending(v.error);
+    return (p
+            ? [false, p]
+            : [true, use(v)]);
+};
 
 const isThunk = (value) => {
     return value instanceof Thunk;
-}
-
+};
 
 //------------------------------------------------------------------------
-// INode
+// Cell
 //------------------------------------------------------------------------
 //
-// An `INode` represents a function call and its cached result.  INodes
-// form a directed acyclic graph, acting as parents and/or children.  In
-// the general case, "function" INodes act as parents and children.
-// "State" INodes are only children.
+// A `Cell` describes a node in a dependency graph.  Cells may have children
+// (other cells on whose results they depend) and parents (cells that depend
+// on their results).  "Function cells" act as parents and children.  "State
+// cells" are only children.  "Root cells" are only parents.
 //
-// Parents implement:
-//    setDirty()
-//    addChild(node, result)
-//
-// Children implement:
-//    get()              : update() & log as dependency of currentNode
-//    update()           : freshen & return current value
+// All cells implement implement the "child cell" interface:
+//    update()
+//    get()
 //    addParent()
 //    removeParent()
 //
+// Cells that depend on other cells implement the "parent cell" interface:
+//    setDirty()
+//    addChild(cell, result)
+//    removeChild()
+//
 
-
-// currentNode holds the node currently being evaluated.  Initialized below.
-let currentNode;
-
-let errors = [];
-
-
-// table for caching nodes
-const nodeCache = new Map();
-
-
-class INode extends Thunk {
-
-    constructor(f, args, key) {
+class Cell extends Thunk {
+    constructor(value, isDirty) {
         super();
-
-        // Generic child node properties
+        this.isDirty = isDirty;
+        this.result = value;
         this.parents = new Set();
-        this.result = null;
-        this.isDirty = true;     // true => result is valud; false => maybe not
-
-        // Function node properties
-        this.f = f;              // const
-        this.args = args;        // const
-        this.key = key;          // const
-
-        // Parent node properties
-        // children: null => never been evaluated
-        //           Map => all logged deps (node -> result)
-        this.children = null;
-        this.cleanups = [];
     }
-
 
     setDirty() {
         if (!this.isDirty) {
@@ -159,48 +200,143 @@ class INode extends Thunk {
         }
     }
 
+    addParent(p) {
+        this.parents.add(p);
+    }
 
-    // A parent's addChild() is called when a dependency is logged against it.
-    // We give the parent responsibility for calling `child.addParent` because
-    // the parent must be responsible for calling `child.removeParent`.
-    //
-    addChild(child, value) {
-        // children==null ==> we are not running within `get`, which only
-        // happens in when `this` is an implicit global root.
-        if (this.children != null) {
-            this.children.set(child, value);
+    removeParent(p) {
+        this.parents.delete(p);
+    }
+}
+
+//------------------------------------------------------------------------
+// StateCell
+//------------------------------------------------------------------------
+//
+// StateCell implements the "child cell" interface.
+//
+
+class StateCell extends Cell {
+    constructor(initial) {
+        super(initial, false);
+    }
+
+    set(value) {
+        if (value !== this.result) {
+            this.result = value;
+            this.setDirty();
         }
+    }
+
+    setError(e) {
+        this.set(new CellException(e));
+    }
+
+    update() {
+        this.isDirty = false;
+        return this.result;
+    }
+
+    get() {
+        const result = this.update();
+        currentCell.addChild(this, result);
+        return result;
+    }
+}
+
+const newState = (initial) => new StateCell(initial);
+
+//------------------------------------------------------------------------
+// FunCell
+//------------------------------------------------------------------------
+
+// currentCell holds the cell currently being evaluated.  Initialized below.
+let currentCell;
+
+// table for caching cells
+const cellCache = new Map();
+
+class FunCell extends Cell {
+    constructor(f, args, key) {
+        // isDirty is tri-state:
+        //   false => result is valid
+        //   true => may need recalc (validate children)
+        //   "new" => needs recalc (has never been evaluated)
+        super(null, "new");
+
+        this.f = f;              // const
+        this.args = args;        // const
+        this.key = key;          // const
+        this.children = null;
+        this.cleanups = null;
+    }
+
+    // Return result & log this cell and its result as a depedendency of
+    // currentCell.
+    //
+    get() {
+        const result = this.update();
+        // If, after evaluation, we have no resources to clean up and we
+        // weren't memoized, then we don't need to track this dependency.
+        if (this.children || this.cleanups || this.key) {
+            currentCell.addChild(this, result);
+        }
+        return result;
+    }
+
+    // Called after our parent has removed us...
+    removeParent(p) {
+        this.parents.delete(p);
+        if (this.parents.size == 0) {
+            this.drop();
+        }
+    }
+
+    // add/removeChild(c) call c.add/removeParent()
+    addChild(child, value) {
+        if (this.children == null) {
+            this.children = new Map();
+        }
+        this.children.set(child, value);
         child.addParent(this);
     }
 
+    removeChild(child) {
+        this.children.delete(child);
+        child.removeParent(this);
+    }
 
     // Call all registered `onDrop` functions.
     //
     cleanup() {
-        // Process cleanups in LIFO order
-        for (let i = this.cleanups.length - 1; i >= 0; --i) {
-            this.cleanups[i].call(null);
+        if (this.cleanups) {
+            // Process cleanups in LIFO order
+            for (const f of this.cleanups.reverse()) {
+                f();
+            }
+            this.cleanups = null;
         }
-        this.cleanups = [];
     }
 
-
-    // Register a function to be called after the node is discarded or before it
+    // Register a function to be called after the cell is discarded or before it
     // is re-evaluated.
     //
     onDrop(cbk) {
+        if (!this.cleanups) {
+            this.cleanups = [];
+        }
         this.cleanups.push(cbk);
     }
 
-
-    // De-activate node, since it is no longer "live".
+    // Discard result, call onDrop handlers, disown children.
+    // Called when this is no longer "live".
     //
     drop() {
         this.cleanup();
 
         // remove from memo table
         if (this.key) {
-            nodeCache.delete(this.key);
+            cellCache.delete(this.key);
         }
 
         // detach from children
@@ -212,144 +348,124 @@ class INode extends Thunk {
         }
     }
 
-
-    addParent(p) {
-        this.parents.add(p);
-    }
-
-
-    removeParent(p) {
-        this.parents.delete(p);
-        if (this.parents.size == 0) {
-            this.drop();
+    // Remove cell from all parents.  This indirectly triggers this.drop().
+    deactivate() {
+        for (const parent of [...this.parents]) {
+            parent.removeChild(this);
         }
     }
 
-
-    // Return result & log this node and its result as a depedendency of
-    // currentNode.
-    //
-    get() {
-        const result = this.update();
-        currentNode.addChild(this, result);
-        if (result instanceof CaughtError) {
-            throw result.e;
-        } else {
-            return result;
-        }
-    }
-
-
-    // Update: Compute result, re-calculating if necessary (without logging
-    // this node as a dependency of its caller).
-    //
+    // Update: Recalculate if necessary.
     update() {
         if (!this.isDirty) {
             return this.result;
         }
 
-        // Update all children.  If they return the same result as before,
-        // then this node remains valid.
-        //
-        let isValid = false;
-        if (this.children != null) {
-            // Validate nodes in the order they were first evaluated,
-            // because decision points generally precede more costly
-            // oprations.  E.g.  if (MODE) A(); else B();
-            isValid = true;
-            for (const [node, result] of this.children) {
-                let value = node.update();
-                // Re-throwing errors in this phase does not seem to work.
-                if (value instanceof CaughtError) {
-                    errors.push(value);
-                }
+        let isInvalid = false;
+
+        if (this.isDirty == "new") {
+            // node has not been calculated
+            isInvalid = true;
+        } else if (this.children) {
+            // Validate cells in the order they were first evaluated,
+            // to avoid recalculating un-live cells.
+            for (const [cell, result] of this.children) {
+                const value = cell.update();
                 if (result !== value) {
-                    if (this.debugInval) {
-                        const thisName = this.name || String(this.f);
-                        const nodeName = node.name || String(node.f);
-                        console.log("Inval " + thisName + " due to " + nodeName + ": "
-                                    + String(result) + " -> " + String(value));
-                    }
-                    isValid = false;
+                    isInvalid = true;
                     break;
                 }
             }
         }
 
-        if (isValid) {
-            this.isDirty = false;
-        } else {
+        this.isDirty = false;
+        if (isInvalid) {
             this.recalc();
+            assert(this.isDirty == false);
         }
         return this.result;
     }
 
-
-    // Call f(args), watching for creation of child nodes
+    // Call f(args), watching for creation of child cells
     //
     recalc() {
         this.cleanup();
 
         const oldChildren = this.children;
-        this.children = new Map();
+        this.children = null;
 
-        const saveCurrentNode = currentNode;
-        currentNode = this;
+        const saveCurrentCell = currentCell;
+        currentCell = this;
         try {
             this.result = this.f.apply(null, this.args);
         } catch (e) {
-            this.result = new CaughtError(e);
+            this.result = new CellException(e);
         }
-        currentNode = saveCurrentNode;
+        currentCell = saveCurrentCell;
 
         if (oldChildren != null) {
+            // A cell cannot transition from some children to *none*
+            // unless there is an untracked dependency.
+            assert(this.children);
             for (const [child, value] of oldChildren) {
                 if (!this.children.has(child)) {
                     child.removeParent(this);
                 }
             }
         }
+    }
+}
 
+// Find a matching cell or create a new one.
+//
+const findCell = (f, args) => {
+    const key = createCellKey(f, args);
+    return cache(cellCache, key, () => new FunCell(f, args, key));
+}
+
+//----------------------------------------------------------------
+// RootCell
+//----------------------------------------------------------------
+
+// A RootCell has no parents and is self-updating.
+//
+class RootCell extends FunCell {
+    constructor() {
+        // `f` and `args` are never referenced in RootCell
+        super();
         this.isDirty = false;
+        // this fake parent exists only to trigger updates
+        this.addParent({
+            setDirty: () => setTimeout(_ => use(this))
+        });
     }
-}
 
-
-// Find a matching node or create a new one.
-//
-const findNode = (f, args) => {
-    const key = createNodeKey(f, args);
-    let node = nodeCache.get(key);
-    if (!node) {
-        node = new INode(f, args, key);
-        nodeCache.set(key, node);
+    // override get() to not add any parents
+    get() {
+        return this.update();
     }
-    return node;
-}
 
+    // preserve children and update them; don't call onDrops
+    recalc() {
+        if (this.children) {
+            for (const [child, _] of this.children) {
+                use(child);
+            }
+        }
+    }
+};
+
+// The globalRoot cell acts as parent for all cell evaluations that occur
+// outside of the scope of another cell's update.
+const globalRoot = new RootCell();
+currentCell = globalRoot;
 
 //----------------------------------------------------------------
-// INode-related APIs
+// Cell-related APIs
 //----------------------------------------------------------------
 
-const I = {};
-
-
-// De-couple evaluation of f(...args) from that of the caller, returning the
-// result.  This can prevent propagation of invalidation in both directions:
-// Changes that invalidate `f(...args)` will not invalidate the caller will
-// not necessarily invalidate the caller.  The resulting node is memoized,
-// so invalidation of the caller will not necessarily discard or re-evaluate
-// `f(...args)`.
-//
-const memo = (f) => (...args) => findNode(f, args).get();
-
-
-// `deferMemo(f)()` is equivalent to `defer(_ => memo(f)(...a))` but
-// more efficient.
-//
-const deferMemo = (f) => (...args) => findNode(f, args);
-
+// Return cell that is currently being evaluated.
+const getCurrentCell = () => currentCell;
 
 // De-couple evaluation of f() without memoizing, returning the result.
 // This prevents propagation of invalidation downstream.  Changes that
@@ -360,112 +476,56 @@ const deferMemo = (f) => (...args) => findNode(f, args);
 // This is often used to de-couple functions that set external state, which
 // typically will never invalidate their caller.
 //
-const isolate = (f) => new INode(f, []).get();
 
-const deferIsolate = (f) => new INode(f, []);
+const newCell = (f, ...args) => new FunCell(f, args);
 
+const activate = (f, ...args) => {
+    const cell = new FunCell(() => {f(...args);});
+    use(cell);     // make it a dependency
+    return cell;
+};
+
+// Provide a function to be called when the current cell is deleted or
+// re-evaluated.
+//
+const onDrop = (f) => currentCell.onDrop(f);
+
+// Create or locate an existing cell that evaluates f(...args).
+//
+// If `fw = wrap(f)`, then:
+//    `fw(...args)` obtains *and uses* a cell that evaluates f(...args)
+//    `fw.cell(...args)` just returns the cell without calling `use`.
+//
+const wrap = (f) => {
+    const useCell = (...args) => use(findCell(f, args));
+    useCell.cell = (...args) => findCell(f, args);
+    return useCell;
+};
+
+//------------------------------------------------------------------------
+// Latch
+//------------------------------------------------------------------------
 
 // Call `fn` passing it its previous return value (or `initial` the first
 // time it is called), an return its result.
 //
 const latch = (initial, fn) => {
-    // get/create map in current node
-    let map = currentNode.latches;
+    // get/create map in current cell
+    let map = currentCell.latches;
     if (map == undefined) {
-        currentNode.latches = map = new Map();
+        currentCell.latches = map = new Map();
     }
 
     // Hack: use String(fn) as key...
-    let key = String(fn);
-    let newValue = fn(map.has(key) ? map.get(key) : initial);
+    const key = String(fn);
+    const newValue = fn(map.has(key) ? map.get(key) : initial);
     map.set(key, newValue);
     return newValue;
 };
 
-
-// Provide a function to be called when the current node is deleted or
-// re-evaluated.
-//
-const onDrop = (f) => currentNode.onDrop(f);
-
-
-// Return node that is currently being evaluated.
-//
-const getCurrentNode = () => currentNode;
-
-
-const debug = (f) => {
-};
-
-
-// Return a root node, which implements the following methods:
-//   get() : get the current value
-//   drop() : discard all child nodes and perform all cleanup
-//
-const newRoot = (f, dirtyCB) => {
-    const node = new INode(f, []);
-    const parent = {
-        setDirty: dirtyCB,
-        addChild: () => {},
-    };
-    node.addParent(parent);
-
-    return node;
-}
-
-
-//----------------------------------------------------------------
-// Global root
-//----------------------------------------------------------------
-//
-// We need a valid root node to be able to execute many of our exported
-// functions.  Generally such code should execute within an
-// explicitly-created root so that cleanup will be done properly, but module
-// initialization code may use functions that call `onDrop`, and modules are
-// never unloaded anyway.  For that use case, we have a default "global"
-// root.  (However, one can imagine a future in which module loading is
-// I-aware and unused modules can be automatically unloaded, and this global
-// root is unnecessary.)
-
-
-currentNode = newRoot(_ => {}, _ => {});
-
-
-//------------------------------------------------------------------------
-// State
-//------------------------------------------------------------------------
-
-
-// A state object is a child but not a parent.
-//
-class IState extends INode {
-    constructor(initial) {
-        super();
-        this.result = initial;
-    }
-
-    set(value) {
-        if (value !== this.result) {
-            this.result = value;
-            this.setDirty();
-        }
-    }
-
-    update() {
-        // clear dirty flag to enable notifications of parents
-        this.isDirty = false;
-        return this.result;
-    }
-}
-
-
-const newState = (initial) => new IState(initial);
-
-
 //------------------------------------------------------------------------
 // Streams
 //------------------------------------------------------------------------
-
 
 class StreamEntry {
     // Append event (given this=tail) and return new tail.
@@ -487,8 +547,7 @@ class StreamEntry {
     }
 }
 
-
-// Create a writable stream (thunk & node).
+// Create a writable stream (thunk & cell).
 //
 // stream.append(value) appends values to the stream.  It is a function and
 // does not need to be invoked as a method.
@@ -504,7 +563,6 @@ const newStream = () => {
     return stream;
 };
 
-
 // Generate one stream from another.  `xform` is passed an array containing
 // all new entries in `stream`; it returns an array of entries for the
 // resulting stream.
@@ -516,9 +574,8 @@ const filterStream = (stream, xform) => {
     let tail = new StreamEntry();
     let prevPos = null;
 
-    // TODO: deferIsolate
-    return deferIsolate(_ => {
-        const pos = stream.get();
+    return newCell(_ => {
+        const pos = use(stream);
         const current = xform(pos.getValuesSince(prevPos));
         prevPos = pos;
         for (const item of current) {
@@ -528,14 +585,13 @@ const filterStream = (stream, xform) => {
     });
 };
 
-
 // The (lazy) most recent value in the stream.
 //
 const mostRecent = (stream, initial) => {
     let prevPos = undefined;
     let recent = initial;
-    return deferIsolate(_ => {
-        const pos = stream.get();
+    return newCell(_ => {
+        const pos = use(stream);
         pos.forEachSince(prevPos, item => {
             recent = item;
         });
@@ -544,68 +600,122 @@ const mostRecent = (stream, initial) => {
     });
 };
 
-
 //------------------------------------------------------------------------
-// Misc.
+// Diagnostics: logCell
 //------------------------------------------------------------------------
 
-// Evaluate and continue to re-evaluate `fn` asynchronously (forever).
-//
-const activate = (fn) => {
-    let root;
-    const update = () => {
-        root.get();
-        if (errors[0]) {
-            let e = errors[0];
-            errors = [];
-            throw e;
+const objIDs = new Map();
+
+const getID = v => cache(objIDs, v, () => objIDs.size);
+
+const cellName = (cell) => {
+    const name =
+          cell.name ? cell.name :  // may be set for debugging
+          cell instanceof RootCell ? "root" :
+          cell instanceof StateCell ? "state" :
+          cell.key ? "wrap" :
+          "cell";
+    return name + String(getID(cell));
+};
+
+const objName = (obj) =>
+      Object.getPrototypeOf(obj).constructor.name
+      + " " + (obj.name ?? "#" + getID(obj));
+
+const valueTextAt = (depth, v, r) =>
+      depth > 9 ? "..." :
+      v instanceof Object ? (
+          (v instanceof Cell ? cellName(v) :
+           v instanceof CellException ? `<Caught ${r(v.error)}>` :
+           v instanceof Pending ? `<Pending ${r(v.value)}>` :
+           v instanceof Function ? (v.name
+                                    ? `${v.name}#${getID(v)}`
+                                    : `<Fn#${getID(v)}>`) :
+           v instanceof Error ? `<Error ${r(v.cause ?? v.message)}>` :
+           v instanceof Array ? (depth == 0 ? `[${v.map(r)}]` : `[...]`) :
+           `<${objName(v)}>`)) :
+      typeof v == "string" ? '"' + v.replace(/\n/g, "\\n") + '"' :
+      String(v);
+
+const valueText = (v) => {
+    const rr = depth => v => valueTextAt(depth, v, rr(depth+1));
+    return rr(0)(v);
+};
+
+const showTree = (start, getChildren, getText, logger) => {
+    const recur = (node, prefix1, prefix) => {
+        getText(node).forEach((line, num) => {
+            logger((num==0 ? prefix1 : prefix) + line);
+        });
+        const a = [...getChildren(node)];
+        a.forEach( (child, ndx) => {
+            recur(child,
+                  prefix + " + ",
+                  prefix + (ndx + 1 == a.length ? "   " : " | "));
+        });
+    };
+    recur(start, "* ", "  ");
+};
+
+const logCell = (root, options) => {
+    root ??= (root === null ? globalRoot : currentCell);
+    options ??= {};
+
+    const getCellText = (cell) => {
+        const name = cellName(cell);
+        const value = valueText(cell.result);
+        const dirty = cell.isDirty ? "! " : "";
+        const out = [`${name}: ${dirty}${value}`];
+        if (!options.brief && cell.f && cell.args
+            && (cell.f.name || cell.args.length > 0)) {
+            const fname = cell.f.name || "<f>";
+            const fargs = cell.args.map(valueText);
+            const ch = (cell.key ? "&" : "=");
+            out.push(`  ${ch} ${fname}(${fargs})`);
         }
+        if (cell.cleanups) {
+            out.push(`  cleanups: ${cell.cleanups.length}`);
+        }
+        return out;
     };
 
-    root = newRoot(fn, () => setTimeout(update));
-    update();
+    showTree(root,
+             c => (c.children ?? []).keys(),
+             getCellText,
+             options.log || console.log.bind(console));
 };
-
-
-// Execute `fn()` in the context of a new root, then clean up.
-//
-const inRoot = (fn) => {
-    const root = newRoot(fn, () => {});
-    const result = root.get();
-    root.drop();
-    return result;
-};
-
 
 //------------------------------------------------------------------------
 // Exports
 //------------------------------------------------------------------------
 
-
 export {
     // High-level
     defer,
-    demand,
+    use,
     isThunk,
-    memo,
-    deferMemo,
-    isolate,
-    deferIsolate,
-    latch,
+    wrap,
+    useError,
+    usePending,
+    checkPending,
+    Pending,
+    rootCause,
 
     // Low-level API
-    onDrop,
     newState,
-    newRoot,
+    newCell,
+    onDrop,
     activate,
-    inRoot,
 
-    // streams
+    // experimental
+    latch,
     newStream,
     filterStream,
     mostRecent,
 
-    // for testing
-    getCurrentNode,
-    createNodeKey,
+    // for testing & diagnostics
+    getCurrentCell,
+    createCellKey,
+    logCell,
+    valueText,
 };

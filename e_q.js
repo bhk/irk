@@ -3,7 +3,7 @@
 import "./mockdom.js";
 import test from "./test.js";
 import E from "./e.js";
-import {newState, newRoot, defer, demand, inRoot} from  "./i.js";
+import {use, newState, newCell, defer} from  "./i.js";
 
 const {eq, assert} = test;
 
@@ -15,7 +15,7 @@ assert(sheet);
 
 // E.set : derive new E
 
-eq(true, inRoot(_ => {
+const testSet = newCell(() => {
     // E(...)
 
     let e = E();
@@ -92,7 +92,10 @@ eq(true, inRoot(_ => {
     eq("black", e.style.color);
 
     return true;
-}));
+});
+
+eq(use(testSet), true);
+testSet.deactivate();
 
 // ASSERT: resources are freed on drop
 eq(sheet.cssRules.length, 0);
@@ -105,8 +108,6 @@ eq(sheet.cssRules.length, 0);
 // persists.  A state variable read by the root cell itself will cause the
 // element to be destroyed and re-created.
 
-let dirties = 0;
-let dirtyFn = _ => { dirties += 1; };
 let icontent = newState(["V"]);
 let icolor = newState("black");
 let ifont = newState("sans-serif");
@@ -120,7 +121,7 @@ let cellFn = _ => {
         color: icolor,
     });
 
-    ix.get();
+    use(ix);
     return CT({
         font: ifont,
         $attrs: {
@@ -129,12 +130,11 @@ let cellFn = _ => {
         },
     }, ["a", icontent, "b"]);
 };
-let cell = newRoot(cellFn, dirtyFn);
+let cell = newCell(cellFn);
 
 // Cycle 1
 
-let e1 = cell.get();
-eq(dirties, 0);
+let e1 = use(cell);
 eq(e1.childNodes.length, 3);
 eq(e1.textContent, "aVb");
 eq(e1.style.font, "sans-serif");
@@ -151,9 +151,7 @@ icolor.set("red");
 ifont.set("mono");
 ialt.set("ALT2");
 iclass.set(null);
-let e2 = cell.get();
-// Assert: invalidation occurred
-eq(dirties, 1);
+let e2 = use(cell);
 // Assert: element persists, but content & property have changed
 assert(e1 === e2);
 eq(e2.textContent, "a<>b");
@@ -167,8 +165,7 @@ eq(sheet.cssRules[0].style.color, "red");
 // Cycle 3: Invalidate root cell
 
 ix.set(1);
-let e3 = cell.get();
-eq(dirties, 2);
+let e3 = use(cell);
 assert(e3 !== e2);
 eq(e3.textContent, "a<>b");
 // Assert: invalidated cell's resources were dropped
@@ -177,5 +174,5 @@ eq(sheet.cssRules[0].selectorText, ".CT");
 // Drop cell
 
 // Assert: no leakage of resources
-cell.drop();
+cell.deactivate();
 eq(sheet.cssRules.length, 0);

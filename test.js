@@ -1,8 +1,13 @@
 // test.js:  Unit testing utilities
 //
 // This module can be conditionally excluded from a bundle by substituting
-// `no-test.js` for `test.js`.  Client modules may contain test cases that
-// will likewise be conditionally excluded:
+// `no-test.js` for `test.js`, for example, in package.json:
+//
+//    "browser": { "./test.js": "./no-test.js" },
+//
+// When client of this module may conditionally skip test cases, as in the
+// following example, a sufficiently smart bundler will exclude the dead
+// code.
 //
 //    import test from "./test.js";
 //

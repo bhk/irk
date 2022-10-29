@@ -1,204 +1,220 @@
 import test from "./test.js";
+import {flushEvents} from "./mockdom.js";
 let {eq, assert} = test;
 
 import {
-    defer, demand, isThunk,
-    memo, deferMemo, isolate, latch,
-    onDrop, newState, newRoot, inRoot,
-    getCurrentNode, createNodeKey,
+    defer, use, isThunk, wrap, useError, usePending, checkPending, Pending,
+    rootCause, newState, newCell, onDrop, activate, latch,
+    getCurrentCell, createCellKey, logCell
 } from "./i.js";
 
+let root = getCurrentCell();
+let events = "";
 
-// defer, demand
+// defer, use, isThunk
 
-eq(2, demand(2));
-eq(null, demand(null));
-eq({}, demand({}));
+eq(2, use(2));
+eq(null, use(null));
+eq({}, use({}));
 const ff = a => a*2;
-eq(ff, demand(ff));
+eq(ff, use(ff));
 
-eq(2, demand(defer(_ => 2)));
-eq(ff, demand(defer(_ => ff)));
+eq(true, isThunk(defer(_ => 2)));
+eq(2, use(defer(_ => 2)));
+eq(ff, use(defer(_ => ff)));
 
+// createCellKey
 
-// createNodeKay
+assert(createCellKey(1, []) != createCellKey(2, []));
+assert(createCellKey(1, []) != createCellKey(1, [2]));
+assert(createCellKey(1, [2]) != createCellKey(1, [2,3]));
+assert(createCellKey(1, [2]) == createCellKey(1, [2]));
+assert(createCellKey(1, [null]) != createCellKey(1, [undefined]));
+assert(createCellKey(1, [undefined]) != createCellKey(1, []));;
+assert(createCellKey(1, [undefined]) == createCellKey(1, [undefined]));;
 
-assert(createNodeKey(1, []) != createNodeKey(2, []));
-assert(createNodeKey(1, []) != createNodeKey(1, [2]));
-assert(createNodeKey(1, [2]) != createNodeKey(1, [2,3]));
-assert(createNodeKey(1, [2]) == createNodeKey(1, [2]));
-assert(createNodeKey(1, [null]) != createNodeKey(1, [undefined]));
-assert(createNodeKey(1, [undefined]) != createNodeKey(1, []));;
-assert(createNodeKey(1, [undefined]) == createNodeKey(1, [undefined]));;
+// test Cell, newState, newCell, onDrop
 
-
-// Create root
-
-let evts = 0;
-const dirtyCB = () => { evts += 1000; };
-
+let rootChildrenSize = (root.children ? root.children.size : 0);
 {
-    const f0 = () => { evts += 1; return 2; };
-    const root = newRoot(f0, dirtyCB);
-    eq(2, root.get());
-    eq(evts, 1);
-    eq(2, root.get());
-    eq(evts, 1);
+    //  a <- b c d
+    //  b <- c x
+    //  c <- x
+    //  d <- y
+
+    const y = newState(1);
+    const x = newState(2);
+    const d = newCell(() => {
+        events += "d";
+        return use(y);
+    });
+    const c = newCell(() => {
+        events += "c";
+        return use(x)**2;
+    });
+    const b = newCell(() => {
+        events += "b";
+        onDrop(() => events += "B");
+        return use(c) + Math.abs(use(x));
+    });
+    const a = newCell(() => {
+        events += "a";
+        return use(b) + use(c) + use(d);
+    });
+
+    // ASSERT: initial use => one recalc of each function cell
+    eq(events, "");
+    eq(use(a), 11);
+    eq(events, "abcd");
+
+    // ASSERT: second use, no changes => no more recalcs
+    eq(use(a), 11);
+    eq(events, "abcd");
+
+    // ASSERT: optimal recalcs despite diamond (a <- b&c <- x)
+    // ASSERT: onDrop() fires prior to recalculation
+    events = "";
+    x.set(1);
+    eq(use(a), 4);
+    eq(events, "cBba");
+
+    // ASSERT: dirty but not invalid dependencies
+    events = "";
+    x.set(-1);
+    eq(use(a), 4);
+    eq(events, "cBb");
+
+    // ASSERT: used cell is activated
+    events = "";
+    x.set(0);
+    eq(a.isDirty, true);
+    flushEvents();
+    eq(a.isDirty, false);
+    eq(events, "cBba");
+    eq(a.result, 1);
+
+    // ASSERT: onDrop() fires when cell is orphaned
+    events = "";
+    a.deactivate();
+    events = "B";
+
+    eq(root.children.size, rootChildrenSize);
 }
 
+// wrap
 
-// memo & isolate
 {
-    const st1 = newState(0);
-    const st2 = newState(0);
-    evts = 0;
-    const f1 = () => { evts += 1; return st1.get() & 1;};
-    const f2 = () => { evts += 10; return st2.get() & 1; };
-    const f3 = () => { evts += 100; return memo(f1)() + isolate(f2); };
-    const root = newRoot(f3, dirtyCB);
-    eq(0, root.get());
-    eq(evts, 111);
-
-    // ASSERT: change to input of an isolate() node dirties its parent
-    st1.set(2);
-    eq(evts, 1111);
-
-    // ASSERT: no additional CB after root is already dirty
-    st1.set(1);
-    eq(evts, 1111);
-
-    // ASSERT: change to input of memo(f1) node dirties its parent
-    // ASSERT: non-memoized isolate(f2) node is re-created when parent re-evals
-    evts = 0;
-    eq(1, root.get());
-    eq(evts, 111);
-
-    // st2 change ==> re-eval f2 & f3.
-
-    // ASSERT: change to input of an isolate() node dirties its parent
-    // ASSERT: isolate(f2) is not memoized (f2 is re-evaluated once before
-    //     f1 and again when f1 re-evals and creates a new isolate(f2) node.
-    // ASSERT: memo(f1) is not re-evaluated.
-    evts = 0;
-    st2.set(1);
-    eq(2, root.get());
-    eq(evts, 1120);
-
-    // change st1 but not f1 => dirty + re-eval only f1
-    evts = 0;
-    st1.set(3);
-    eq(2, root.get());
-    eq(evts, 1001);
-
-    // no change => no dirty + no re-eval
-    evts = 0;
-    eq(2, root.get());
-    eq(evts, 0);
+    let f = (a, b) => a + b;
+    let w = wrap(f);
+    // ASSERT: matching invocations return same cell
+    eq(w.cell(1,2), w.cell(1,2));
+    // ASSERT: w(...) == use(w.cell(...)
+    eq(w(1, 2), use(w.cell(1,2)))
+    eq(w(1,2), 3);
+    w.cell(1,2).deactivate();
+    eq(root.children.size, rootChildrenSize);
 }
 
+// activate
 
-// Exception handling: catch and remember sub-node's error
-if (false) {
-    const st1 = newState(() => 1);
-    const st2 = newState(0);
-    const f1 = () => {
-        evts += 1;
-        const f = st1.get();
-        return f();
+{
+    let s = newState(0);
+    let f = (a, b) => {
+        let value = a + b + use(s);
+        events += "(" + value + ")";
+        return value;
+    };
+
+    // ASSERT: activate() synchronously updates
+    events = "";
+    let c1 = activate(f, 1, 2);
+    eq(events, "(3)");
+
+    // ASSERT: activate() is *not* memoized
+    let c2 = activate(f, 1, 2);
+    eq(events, "(3)(3)");
+    assert(c1 != c2);
+    c2.deactivate();
+
+    // ASSERT: activate() discards result
+    eq(use(c1), undefined);
+
+    // ASSERT: activate() returns activated cell
+    events = "";
+    s.set(1);
+    eq(root.isDirty, true);
+    flushEvents();
+    eq(events, "(4)");
+    eq(root.isDirty, false);
+
+    c1.deactivate();
+    eq(root.isDirty, false);
+}
+
+// test useError, usePending, Pending, rootCause, and exception handling
+// TODO: state.setError
+
+{
+    // ASSERT: `throw` is caught at cell boundary
+    // ASSERT: use() of cell in error state throws an Error()
+    // ASSERT: useError(cell) returns the thrown error/object
+    let st = newState("THROWN");
+    let errCell = newCell(() => { throw use(st); });
+    let cell = newCell(() => use(errCell));
+    let [succ, v] = useError(cell);
+    eq(succ, false);
+    eq(rootCause(v), "THROWN");   // TODO: rootCause by default
+    [succ, v] = useError(errCell);
+    eq(succ, false);
+    eq(rootCause(v), "THROWN");
+
+    // ASSERT: usePending catches Pending() errors
+    st.set(new Pending("st"));
+    let [done, result] = usePending(cell);
+    eq([done, result], [false, "st"]);
+
+    // ASSERT: usePending re-throws non-Pending errors
+    st.set("XXX");
+    let caught = false;
+    try {
+        usePending(cell);
+    } catch (e) {
+        caught = e;
     }
-    const main = () => {
-        evts += 10;
-        st2.get();
-        try {
-            return memo(f1)();
-        } catch (e) {
-            return e.name;
-        }
+    assert(caught instanceof Error);
+
+    // ASSERT: root cell auto-update does not catch errors
+    st.set(new Pending("connecting"));
+    eq(root.isDirty, true);
+    caught = false;
+    try {
+        flushEvents();
+    } catch (e) {
+        console.log("Caught!");
+        caught = e;
     }
+    assert(caught);
+    eq(root.isDirty, false);
 
-    evts = 0;
-    const root = newRoot(main, dirtyCB);
-    eq(1, root.get());
-    eq(11, evts);
+    // ASSERT: checkPending(e) recovers value from thrown Pending object
+    eq(checkPending(caught), "connecting");
+    eq(1, checkPending(new Error("foo", {cause: new Pending(1)})));
+    eq(2, checkPending(new Pending(2)));
 
-    evts = 0;
-    st1.set(() => 1);
-    eq(1, root.get());
-    eq(1001, evts);   // invalidate + f1 node
-
-    // Generate error with `null`
-    evts = 0;
-    st1.set(null);
-    eq("TypeError", root.get());
-    eq(1011, evts);
-
-    // Invalidate main().  Cached exception should be re-thrown.
-    evts = 0;
-    st2.set(1);
-    eq("TypeError", root.get());
-    eq(1010, evts);
-
-    root.drop();
+    // ASSERT: checkPending returns `undefined` for non-pending errors/causes
+    eq(undefined, checkPending("hi"));
+    eq(undefined, checkPending(null));
 }
-
-// ASSERT: root node re-throws (regression)
-
-let x = null;
-try {
-    x = inRoot(_ => { let f = null; f(1); return 1;});
-} catch (e) {
-    x = "Caught!";
-}
-eq("Caught!", x);
-
-
-// deferMemo
-{
-    evts = 0;
-    let x = deferMemo(_ => {evts += 1; return 7;})();
-
-    eq(true, isThunk(x));
-    eq(evts, 0);
-    eq(x.get(), 7);
-    eq(evts, 1);
-}
-
-
-// onDrop
-
-let log = "";
-const stD = newState("A");
-const fD = () => {
-    onDrop(() => {log += ">"});
-    onDrop(() => {log += "<drop"});
-    log += stD.get();
-};
-const rootD = newRoot(fD, () => {});
-
-// ASSERT: on initial eval, fD is called but its onDrop is not
-rootD.get();
-eq("A", log);
-
-// ASSERT: on re-eval, fD is called again *after* onDrops are called
-// ASSERT: onDrops are processed LIFO
-stD.set("B");
-rootD.get();
-eq("A<drop>B", log);
-
-// ASSERT: when root is dropped, onDrop is called.
-rootD.drop();
-eq("A<drop>B<drop>", log);
-
 
 // latch
 
 {
     let s1 = newState(1);
     let f = () => {
-        return latch(0, n => n + demand(s1));
+        return latch(0, n => n + use(s1));
     }
-    const root = newRoot(f, () => {});
-    eq(1, root.get());
+    const cell = newCell(f);
+    eq(1, use(cell));
     s1.set(2);
-    eq(3, root.get());
+    eq(3, use(cell));
 }

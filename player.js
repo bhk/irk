@@ -3,7 +3,7 @@
 import kfat from "../kfat/logparse/.crank/out/kfat.js";
 import newGrid from "./grid.js";
 import {E, setProps, setContent} from "./e.js";
-import {newState, deferMemo, demand, activate} from "./i.js";
+import {newState, use, activate} from "./i.js";
 import {fmtTime, merge} from "./util.js";
 
 // Returns conduit holding input field contents.
@@ -22,7 +22,7 @@ const newInput = (props) => {
         },
     });
 
-    const text = textState.get.bind(textState);
+    const text = () => use(textState);
     return [e, text];
 };
 
@@ -111,10 +111,10 @@ let [srchElem, searchText] = newInput({
 // Grid
 //----------------------------------------------------------------
 
-const db = deferMemo(_ => filterSongs(searchText()))();
+const db = wrap(_ => filterSongs(searchText())).cell();
 
 function rowClicked(n, _db) {
-    const db = demand(_db);
+    const db = use(_db);
     const song = db[n];
     const file = song.path;
     const src = encodeURIComponent(song.path).replace(/%2[Ff]/g, "/");

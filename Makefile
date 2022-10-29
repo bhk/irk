@@ -1,3 +1,8 @@
+# make 'ODemo(FOO.js)' : build and open an HTML file that contains
+#     FOO.js and its dependencies.  Also tests the bundle by running
+#     it in `node` with mockdom.js
+# 
+
 Alias(default).in = Alias(test)
 Alias(test).in = TestJS@tests TestJSB@demos
 Alias(demo).in = JSToHTML@Bundle@demos

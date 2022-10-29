@@ -3,7 +3,7 @@
 import E from "./e.js";
 import {handleDrag} from "./drag.js";
 
-import {defer, demand, mostRecent, newState, onDrop} from "./i.js";
+import {defer, use, mostRecent, newState, onDrop} from "./i.js";
 
 const max = (a,b) => a<b ? b : a;
 
@@ -178,7 +178,7 @@ const GridTop = E.set({
 });
 
 const newCell = (value, fmt, align, rowIndex, colIndex) => {
-    console.log("gridArea: " + (rowIndex+1) + " / " + (colIndex+1));
+    // console.log("gridArea: " + (rowIndex+1) + " / " + (colIndex+1));
     return DataCell({
         textAlign: align || "",
         gridArea: (rowIndex+1) + " / " + (colIndex+1),
@@ -215,14 +215,14 @@ const newColHeader = (fields, colInfo, colIndex) => {
     } else {
         let dragDx = newState(0);
         let restWidth = newState(width);
-        colWidth = defer(_ => dragDx.get() + restWidth.get());
+        colWidth = defer(_ => use(dragDx) + use(restWidth));
         eDivider = DragDivider();
         let dereg = handleDrag(eDivider, {
             dragMove: (dx, dy) => {
                 dragDx.set(dx);
             },
             dragStop: () => {
-                restWidth.set(restWidth.get() + dragDx.get());
+                restWidth.set(use(restWidth) + use(dragDx));
                 dragDx.set(0);
             },
             dragStart: () => {},
@@ -277,7 +277,7 @@ const newGrid = (columns, fields, db, fnRowClicked) => {
     }).reverse();
 
     // This value describes the widths of all columns
-    const gtc = defer(_ => widths.map(w => demand(w)+"px").join(" ") + " 1fr");
+    const gtc = defer(_ => widths.map(w => use(w)+"px").join(" ") + " 1fr");
 
     const hdrGrid = HdrGrid({gridTemplateColumns: gtc}, headers);
 
@@ -297,7 +297,7 @@ const newGrid = (columns, fields, db, fnRowClicked) => {
                 }
             },
         },
-    }, defer(_ => createGridCells(demand(db), columns, fields)));
+    }, defer(_ => createGridCells(use(db), columns, fields)));
 
     return GridTop(null, dataGrid, hdrGrid);
 };

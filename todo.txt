@@ -1,23 +1,14 @@
 Current
 =======
 
+ - I: always intern values used in equality tests? (wrapped fn args &
+      cell results) reduce confusion; ensure semantics more like "IFL"
  - grid: repeating background?
  - grid: demo vertical & horizontal scrolling
  - drag: leverage `listen` from e.js?
  - demo: Demo needn't/shoudn't be `posn: abs`
  - demo: provide buttons for un-render / re-render
  - eventDemo/dragStream: capture vs. document listener
- - I: When outside of any cell, memos are no-ops
- - I: Make "isolate" lightweight when a no-op (no child cells)
- - I: refactor...
-    * Describe `memo`
-    * defer(f, ...args)
-         defer(_ => f(a,b))  <-->   defer(f, a, b)
-    * Remove deferMemo
-         deferMemo(f)(a,b)    -->   defer(memo(f), a,b)
- - I: Document "monitoring": "during execution of a cell, its accesses of
-   other cells (inputs, intermediates) are logged."
-
  - E: Optimize setContent? (not re-populate all children?)
  - E: dereg listener on drop? [needed?]
  - Validate "clean" install using "npm update"
@@ -67,28 +58,3 @@ Longer-term
    non-DOM parent nodes that exist for addressing purposes.  The current
    e.js model (creation of DOM nodes when views are created) means we cannot
    know *where* we are in the tree until some unknown later point in time.
-
- * wrap() optimized for constant case, so 'isolate(...demand(...))' is
-   efficient. [TODO: memo & onDrop; keep in mind fn vs. cell vs. invocation]
-
-      const g_cc = [];  // cell children
-
-      const isolate = (fn) => {
-         const ccn = g_cc.length;
-         const result = fn();
-         if (ccn != g_cc.length) {
-            g_cc[ccn] = new Cell(g_cc.slice(ccn, g_cc.length), result);
-            g_cc.length = ccn+1;
-         }
-         return result;   // nothing to do
-      }
-
-      class Cell {
-         // we do not know our parent at creation time...
-         constructor (children, result) {
-            this.children = children;
-            this.result = result;
-            this.parent = nullParent;
-            children.forEach(c => c.parent = cell);
-         }
-      }

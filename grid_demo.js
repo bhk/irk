@@ -1,7 +1,5 @@
 import {
-    defer, demand, memo, isolate, deferMemo, deferIsolate,
-    newState, mostRecent, filterStream,
-    getCurrentNode,
+    use, wrap, newState, getCurrentCell,
 } from "./i.js";
 import E from "./e.js";
 import {run, log} from "./demo.js";
@@ -23,7 +21,7 @@ const newInput = (style, text) => {
             input: (evt) => (ivalue.set(e.value), true),
         }
     });
-    return {e, value: ivalue.get.bind(ivalue)};
+    return {e, value: () => use(ivalue)};
 };
 
 //----------------------------------------------------------------
@@ -71,9 +69,6 @@ const columns = [
 const itemCount = newState(sampleEntries.length);
 
 run(_ => {
-    getCurrentNode().debugInval = true;
-    getCurrentNode().name = "MAIN";
-
     let rowClicked = (row) => log("Click: row " + row);
 
     let entries = newInput({}, "# Entries...");
@@ -85,7 +80,7 @@ run(_ => {
         "Verify: Click reports row number (and when scrolled)",
     ];
 
-    let db = deferMemo(_ => {
+    let db = wrap(_ => {
         const a = [];
         const k = Number(entries.value() || 30) || 0;
         const kSample = sampleEntries.length;
@@ -93,8 +88,8 @@ run(_ => {
             a.push(sampleEntries[i % kSample]);
         }
         return a;
-    })();
-    let subject = newGrid(columns, fields, db, rowClicked);
+    });
+    let subject = newGrid(columns, fields, db.cell(), rowClicked);
 
     return {subject, controls};
 });

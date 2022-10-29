@@ -1,5 +1,5 @@
 import {
-    defer, demand, mostRecent, newState, newStream, memo, onDrop
+    defer, use, mostRecent, newState, newStream, wrap, onDrop
 } from "./i.js";
 import {E, setProps} from "./e.js";
 import {run, log} from "./demo.js";
@@ -21,11 +21,10 @@ const eventStream = function (e, eventNames) {
 };
 
 // Return `factory` where factory(elem) returns a drag stream for elem.
-// This function should be memoized so that only one set of event listeners
-// will need to be added to `document` no matter how many elements have drag
-// streams.
+// This function is wrapped so that we will have only one factory, and one
+// set of event listeners (whose lifetime is controlled by cell liveness).
 //
-const getDragStreamFactory = () => {
+const getDragStreamFactory = wrap(() => {
     const m = new Map();  // elem -> {stream, refs}
     let activeStream = null;
     let eventDown;
@@ -74,7 +73,7 @@ const getDragStreamFactory = () => {
         }
 
         onDrop(_ => {
-            rec.refs -= 1
+            rec.refs -= 1;
             if (rec.refs == 0) {
                 m.delete(elem);
             }
@@ -83,12 +82,12 @@ const getDragStreamFactory = () => {
     };
 
     return factory;
-}
+});
 
 // Deliver drag events for `elem` (see e.txt).
 //
 const dragStream = (elem) => {
-    const factory = memo(getDragStreamFactory)();
+    const factory = getDragStreamFactory();
     return factory(elem);
 };
 
@@ -156,7 +155,7 @@ run(_ => {
 
     const a = Box(null, "A");
     const aEvent = mostRecent(dragStream(a));
-    const aStatus = Status(null, defer(_ => serialize(demand(aEvent))));
+    const aStatus = Status(null, defer(_ => serialize(use(aEvent))));
 
     // B: move event target (partially overlaps A)
 
@@ -168,7 +167,7 @@ run(_ => {
         background: "transparent",
     }, "B");
     const bEvent = mostRecent(eventStream(b, ["mousemove"]));
-    const bStatus = Status(null, defer(_ => serializeEvent(demand(bEvent))));
+    const bStatus = Status(null, defer(_ => serializeEvent(use(bEvent))));
 
     const subject = E(null, "- ", a, E({$tag: "br"}), b);
 

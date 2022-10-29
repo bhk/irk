@@ -40,12 +40,17 @@
 //    - A non-CSS definition: key ∈ {"$tag", "$ns", "$name", "$attrs"}
 //    - A sub-rule: key = selector pattern; value = ElemProps
 //
-//   Non-CSS property keys begin with `$`.  Sub-rules keys contain a `&`.
+//   Non-CSS property keys begin with `$`.  Sub-rules keys contain a `&`,
 //   Other keys are treated as CSS propery names, either using JS
 //   (camel-case) or CSS syntax.
 //
-//   The value of a sub-rule entry is an ElemProps value that may not contain
-//   non-CSS properties.
+//   The key of a sub-rule is a selector in which "&" represents the current
+//   element.  Its value an ElemProps value that may not contain non-CSS
+//   properties.  These sub-properties will apply only when the selector
+//   matches the current element.  For example, this will set the element's
+//   color to red when it follows an <h2> element:
+//
+//       { "h2 + &": { color: "red" } }
 //
 //   Non-CSS properties:
 //
@@ -121,7 +126,7 @@
 //        provides the benefits of (b) and (c) while keeping usage simple.
 //        However, it complicates the implementation.
 
-import {isolate, demand, isThunk, onDrop} from "./i.js";
+import {activate, use, isThunk, onDrop} from "./i.js";
 import test from "./test.js";
 
 const D = document;
@@ -266,7 +271,7 @@ const deleteRules = (selectorSet) => {
 //
 const setStyleProperty = (style, name, value) => {
     if (isThunk(value)) {
-        isolate(_ => setStyleProperty(style, name, demand(value)));
+        activate(_ => setStyleProperty(style, name, use(value)));
     } else {
         name = cssName(name);
         style[name] = (value == null ? "" : cssValue(value));
@@ -316,11 +321,11 @@ let setListeners = (e, o) => {
 };
 
 // Set attribute `name` to `value`.  Do not assume values have not already
-// been set on the element; this can be re-evaluted in an isolated function.
+// been set on the element; this can be re-evaluted in an activated cell.
 //
 let setAttr = (e, name, value) => {
     if (isThunk(value)) {
-        isolate(_ => setAttr(e, name, demand(value)));
+        activate(_ => setAttr(e, name, use(value)));
     } else if (typeof value == "function") {
         throw Error("bad attribute");
     } else {
@@ -335,8 +340,8 @@ let setAttr = (e, name, value) => {
 let setAttrs = (e, attrs, autoClass) => {
     for (let key in attrs) {
         if (key == "class") {
-            isolate(_ => {
-                let value = demand(attrs[key]);
+            activate(_ => {
+                let value = use(attrs[key]);
                 e.setAttribute(key, autoClass + (value ? " " + value : ""));
             });
         } else {
@@ -372,7 +377,7 @@ let setContent = (e, content) => {
 
     let appendContent = child => {
         // Allow "holes" in the content array
-        child = demand(child);
+        child = use(child);
         if (child instanceof Array) {
             child.forEach(appendContent);
         } else if (child != null && child !== "") {
@@ -409,10 +414,13 @@ let defaultES = {
     name: "E0",
 };
 
-// Extract components of a `props` value.
+// Separate an ElemProps into its non-CSS and CSS parts.
+// (esIn, props) -> [esOut, rules]
 //
 //   esIn: ElemState
 //   props: ElemProps
+//   esOut: an ElemState to which the non-CSS properties have been applied
+//   rules: CSS rules that apply CSS properties from `props`
 //
 let splitProps = (esIn, propsIn) => {
     if (propsIn == null) {
@@ -531,7 +539,7 @@ let createElem = (esIn, props, content) => {
     let [es, rules] = splitProps(esIn, props);
     let e = newElement(es.tag, es.ns);
     setElem(e, es, rules);
-    isolate(_ => setContent(e, content));
+    activate(_ => setContent(e, content));
     return e;
 };
 

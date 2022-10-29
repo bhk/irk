@@ -1,7 +1,7 @@
 // demo: Display a web page for demonstrating a JS module.
 //
 
-import {newState, defer, activate} from "./i.js";
+import {use, wrap, newState, defer} from "./i.js";
 import {E, setContent} from "./e.js";
 
 // Export for debugging
@@ -42,7 +42,7 @@ const Demo = E.set({
 // Log
 //
 let logState = newState([]);
-let log = (str) => logState.set([...logState.get(), str]);
+let log = (str) => logState.set([...use(logState), str]);
 let LogLine = E.set({$tag: "p"});
 
 // `style` applies to the frame containing the element under test.
@@ -62,7 +62,7 @@ const demoView = ({subject, controls, frameStyle}) => {
 
         // log
         Log(null, defer(_ => {
-            return logState.get().map(e => LogLine(null, e));
+            return use(logState).map(e => LogLine(null, e));
         })),
     ]);
 }
@@ -70,17 +70,11 @@ const demoView = ({subject, controls, frameStyle}) => {
 // Evaluate `main` and display its results in the demo context.
 // The results of `main()` are passed to `demoView`.
 //
-const run = (main) => {
-    activate(() => {
-        const opts = main();
-        const top = demoView(opts);
-        setContent(document.body, top);
-        // Display dependencies:
-        //        for (let [c, result] of getCurrentNode().children) {
-        //            console.log("D[" + String(c.f) + " -> " + result + "]");
-        //        }
-    });
-};
+const run = wrap((main) => {
+    const opts = main();
+    const top = demoView(opts);
+    setContent(document.body, top);
+});
 
 export {
     run,

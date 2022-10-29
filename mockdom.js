@@ -17,6 +17,7 @@
 // <StyleRule>.selectorText
 // <StyleRule>.style
 // <Style>.<propertyName>
+// WebSocket
 
 import test from "./test.js";
 import assert from "assert";
@@ -293,17 +294,142 @@ class Document extends Node {
 }
 
 //--------------------------------
+// Mock Event Queue
+//--------------------------------
+
+let eventQueue = [];
+
+let postEvent = (target, event) => {
+    eventQueue.push({target, event});
+};
+
+let dispatchEvents = () => {
+    let events = eventQueue;
+    eventQueue = [];
+    for (let {target, event} of events) {
+        target.dispatchEvent(event);
+    }
+    return events.length > 0;
+};
+
+let flushEvents = () => {
+    while (dispatchEvents()) ;
+};
+
+const setTimeout = (fn, delay) => {
+    postEvent({dispatchEvent: () => fn()},
+              {type: "MockTimer", delay: delay});
+};
+
+//--------------------------------
+// Event & EventTarget
+//--------------------------------
+
+class Event {
+    static nextEventID = 0;
+
+    constructor(type, options) {
+        this.type = type;
+        this.lastEventId = this.nextEventId++;
+        this.bubbles = options?.bubbles ?? false;
+        this.cancelable = options?.cancelable ?? false;
+        this.composed = options?.composed ?? false;
+    }
+}
+
+class MessageEvent extends Event {
+    constructor(type, options) {
+        super(type, options);
+        this.data = options?.data ?? null;
+    }
+}
+
+class EventTarget {
+    dispatchEvent(evt) {
+        let name = evt.type;
+        let handler = this["on" + name];
+        if (handler) {
+            evt.target = this;
+            evt.currentTarget = this;
+            //console.log(`EventTarget: dispatch ${name} ${evt.data || ""}`);
+            handler(evt);
+            //console.log(`EventTarget: done`);
+        } else {
+            (this._dropped || (this._dropped = [])).push(evt);
+            //console.log(`EventTarget: drop ${name} ${evt.data || ""}`);
+        }
+    }
+}
+
+//--------------------------------
+// WebSocket
+//--------------------------------
+
+class WebSocket extends EventTarget {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+
+    constructor(url, protocol) {
+        super();
+        this.readyState = WebSocket.CONNECTING;
+        this.bufferedAmount = 0;
+        this.url = url;
+        this.protocol = protocol || 'ws';
+        this.readyState = 0;
+        this._peer = null;
+    }
+
+    close() {
+        this.readyState = WebSocket.CLOSED;
+        this._peer = null;
+    }
+
+    send(msg) {
+        assert(this.readyState == WebSocket.OPEN);
+        assert(typeof msg == "string");
+        postEvent(this._peer, new MessageEvent("message", {data: msg}));
+    }
+
+    _connect(ws) {
+        this._peer = ws;
+        this.readyState = WebSocket.OPEN;
+        postEvent(this, new Event("open"));
+    }
+}
+
+let connect = (ws1, ws2) => {
+    ws1._connect(ws2);
+    ws2._connect(ws1);
+};
+
+//--------------------------------
 // Browser Globals
 //--------------------------------
+
+// Assign Node globals to enable testing of modules that assume the browser
+// environment (as long as they are loaded after this module).
 
 let G = global;
 
 G.window = global;
 G.document = new Document();
-
-// so "instanceof" will work...
 G.Node = Node;
 G.Element = Element;
+G.Event = Event;
+G.MessageEvent = MessageEvent;
+G.EventTarget = EventTarget;
+G.WebSocket = WebSocket;
+G.setTimeout = setTimeout;
+
+export {
+    connect,
+    eventQueue,
+    postEvent,
+    dispatchEvents,
+    flushEvents,
+}
 
 //--------------------------------
 // quick self-test
@@ -323,4 +449,18 @@ if (test) {
     const r = sheet.cssRules[0];
 
     eq(r.selectorText, "p");
+
+    // test WebSocket & events
+    let ws1 = new WebSocket();
+    let ws2 = new WebSocket();
+    let out1 = [];
+    let out2 = [];
+    eq(ws1.readyState, WebSocket.CONNECTING);
+    ws1.onmessage = (evt) => out1.push(evt.data);
+    ws2.onmessage = (evt) => out2.push(evt.data);
+
+    connect(ws1, ws2);
+    ws1.send("hi");
+    flushEvents();
+    eq(out2, ["hi"]);
 }
