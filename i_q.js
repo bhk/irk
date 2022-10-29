@@ -126,9 +126,6 @@ let rootChildrenSize = (root.children ? root.children.size : 0);
     assert(c1 != c2);
     c2.deactivate();
 
-    // ASSERT: activate() discards result
-    eq(use(c1), undefined);
-
     // ASSERT: activate() returns activated cell
     events = "";
     s.set(1);

@@ -470,7 +470,7 @@ const getCurrentCell = () => currentCell;
 const newCell = (f, ...args) => new FunCell(f, args);
 
 const activate = (f, ...args) => {
-    const cell = new FunCell(() => {f(...args);});
+    const cell = new FunCell(f, args);
     use(cell);     // make it a dependency
     return cell;
 };
