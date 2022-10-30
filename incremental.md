@@ -76,8 +76,11 @@ corresponds to "cells" in spreadsheets, and to "rules" in Make and other
 build systems.  Cells and their dependencies describe a directed acyclic
 graph called the dependency graph.
 
+We sometimes refer to dependencies of a cell as its **children**, and the
+cell(s) that depend upon it **parents**.
+
 A **leaf cell** contains just a value and has no dependencies.  It may
-change over time based on factors external to our program.
+change over time based on external events.
 
 A **function cell** describes a computation.  It consumes values produced by
 other cells and produces its own value.  Execution of function cell yields a
@@ -267,9 +270,8 @@ In JS, `newState(initialValue)` constructs a state cell.
 can be called outside of the reactive comain (that is: outside of the scope
 of a cell recalc).
 
-TODO: If called within the reactive domain, the change will be applied after
-the end of the current update cycle.
-
+If `set` is called during an update cycle -- while another cell is being
+recalculated -- this will be detected and a fatal error will be thrown.
 
 
 ## Implementation Notes
@@ -343,6 +345,39 @@ complications.  For now we only make these observations:
    from evidence of parallelism (e.g. overlapping time frames in the most
    previoss recalc), or perhaps from knowledge of how parallelism is
    employed in the code (e.g. help from the language runtime).
+
+
+### Void Cells
+
+Cells that yield no value (or, more generally, those that yield a constant
+value) are a special case.  These are sometimes used for side effects --
+they consume incrementally computed values and send them out into the
+enclosing environment (e.g. the DOM tree).  When their dependencies change,
+they are marked dirty, which ensures their recalculation, wherein they can
+re-apply their side effects.  Dirtying the cell dirties its parent, and its
+parent, and so on, to the root cell where it ensures an asynchronous update
+will be performed, which will then propagate back up the dependency graph to
+the void node.
+
+It would be possible to handle void cell recalculation more directly.
+Instead of marking its parent dirty, a void cell could directly register
+with the root, which would place it in a list.  After the ordinary update
+algorithm completes, it would then proceed to update each "dirty void", but
+only those that remain live.  A dirty void cell may be non-live (having no
+parents) after the ordinary update, in which case it should be skipped.
+
+There is however, one unfortunate complication.  The "dirty voids" update
+might itself affect the liveness of dirty void cells.  So, to avoid updating
+non-live cells, we must apply these dirty void updates in the appropriate
+order ... which is the order as determined by walking the dependency graph.
+If we had an efficient way of ordering the dirty voids, we could apply it to
+all cells in general!  But one other possibility is to simply avoid this
+optimization for dirty voids that have other dirty voids as descendants
+(indirect dependencies).
+
+The parent-child relationship is still important for determining liveness
+and controlling the lifetimes of these cells, but the parents do not need to
+be directly involved in recalculation since void cells cannot affect them.
 
 
 ### Scope of Memoization
