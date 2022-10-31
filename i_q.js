@@ -5,7 +5,7 @@ let {eq, assert} = test;
 import {
     defer, use, isThunk, wrap, useError, usePending, checkPending, Pending,
     rootCause, newState, newCell, onDrop, activate, latch,
-    getCurrentCell, logCell
+    getCurrentCell, setLogger
 } from "./i.js";
 
 let root = getCurrentCell();
@@ -161,27 +161,31 @@ let rootChildrenSize = (root.children ? root.children.size : 0);
     eq([done, result], [false, "st"]);
 
     // ASSERT: usePending re-throws non-Pending errors
-    st.set("XXX");
-    let caught = false;
-    try {
-        usePending(cell);
-    } catch (e) {
-        caught = e;
+    {
+        st.set("XXX");
+        const pcell = newCell(() => use(cell));
+        let [succ, value] = useError(pcell);
+        eq(succ, false);
+        eq(value, "XXX");
+        pcell.deactivate();
     }
-    assert(caught instanceof Error);
 
-    // ASSERT: root cell auto-update does not catch errors
+    // ASSERT: root cell auto-update does not catch errors, but does log them
     st.set(new Pending("connecting"));
     eq(root.isDirty, true);
-    caught = false;
+    let caught = false;
+    let logs = "";
+    // capture
+    const oldlog = setLogger((msg) => { logs += msg });
     try {
         flushEvents();
     } catch (e) {
-        console.log("Caught!");
         caught = e;
     }
+    setLogger(oldlog);
     assert(caught);
     eq(root.isDirty, false);
+    assert(logs.match("Error"));
 
     // ASSERT: checkPending(e) recovers value from thrown Pending object
     eq(checkPending(caught), "connecting");

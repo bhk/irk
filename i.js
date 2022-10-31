@@ -41,6 +41,14 @@ const cache = (map, key, fn) => {
     return map.has(key) ? map.get(key) : (v = fn(), map.set(key, v), v);
 };
 
+let log = console.log.bind(console);
+
+const setLogger = (f) => {
+    const old = log;
+    log = f;
+    return old;
+};
+
 //------------------------------------------------------------------------
 // Exceptions
 //------------------------------------------------------------------------
@@ -117,11 +125,14 @@ const checkPending = (error) => {
     }
 };
 
+let showRootErrors;
+
 // Force evaluation and throw if value is in error state.
 //
 const use = (value) => {
     value = unthunk(value);
     if (value instanceof CellException) {
+        showRootErrors(value.error);
         throw new Error("used error value", {cause: value.error});
     }
     return value;
@@ -450,6 +461,40 @@ class RootCell extends FunCell {
 const globalRoot = new RootCell();
 currentCell = globalRoot;
 
+// Display error causes if we are throwing an error outside of a cell.  When
+// an error is not caught, browsers will display an error in the console but
+// most will fail to display the stack traces for the `cause` errors, which
+// are crucial for understanding what's going on.
+//
+// Also, elide stack entries that originiate from this file.
+//    Chrome:     at use (http://ORIGIN/i.js:139:13)
+//    Safari: use@http://ORIGIN/i.js:139:20
+//   Firefox: use@http://ORIGIN/i.js:139:13
+//
+const showErrorCauses = (e) => {
+    if (e.cause) {
+        showErrorCauses(e.cause);
+    }
+    let stack = e.stack;
+    if (stack) {
+        if (!stack.match("^Error: ")) {
+            stack = (`Error: ${e.message}\n` + stack)
+                .replace(/\n([^@:/\n]+)@([^\n]+)/g, "\n@$1 ($2)")
+                .replace(/\n@/g, "\n    at ");
+        }
+        log(stack.replace(/\n[^\n]+\/i\.js:[^\n]+/g, ''));
+    } else {
+        log(e);
+    }
+};
+
+showRootErrors = (e) => {
+    if (currentCell == globalRoot) {
+        log("-- Error caught at root:");
+        showErrorCauses(e);
+    }
+};
+
 //----------------------------------------------------------------
 // Cell-related APIs
 //----------------------------------------------------------------
@@ -672,7 +717,7 @@ const logCell = (root, options) => {
     showTree(root,
              c => (c.children ?? []).keys(),
              getCellText,
-             options.log || console.log.bind(console));
+             options.log || log);
 };
 
 //------------------------------------------------------------------------
@@ -707,4 +752,5 @@ export {
     getCurrentCell,
     logCell,
     valueText,
+    setLogger,
 };
