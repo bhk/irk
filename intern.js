@@ -1,11 +1,14 @@
 // intern.js: find a canonical, immutable, equivalent value
 
+// this value is different from all other values
+const UNSET = {};
+
 class Step {
     constructor(elem, prev) {
         this.elem = elem;
         this.prev = prev;
         this.nexts = new Map();
-        this.value = undefined;
+        this.value = UNSET;
     }
 
     next(elem) {
@@ -22,35 +25,44 @@ class Step {
 const interns = new Map();
 const emptyArray = new Step();
 const emptyObject = new Step();
+const memoRoot = new Step();
 const objectProto = Object.getPrototypeOf({});
 
-const internArray = (a) => {
-    let step = emptyArray;
-    for (const e of a) {
-        step = step.next(intern(e));
+const internSeq = (root, args, f) => {
+    let step = root;
+    for (const arg of args) {
+        step = step.next(intern(arg));
     }
-    if (step.value) {
+    if (step.value !== UNSET) {
         return step.value;
     }
 
     // create `ai` whose elements are all interned
-    let ai = new Array(a.length);
+    let ai = new Array(args.length);
     let rs = step;
-    for (let i = a.length - 1; i >= 0; --i, rs = rs.prev) {
+    for (let i = args.length - 1; i >= 0; --i, rs = rs.prev) {
         ai[i] = rs.elem;
     }
-    ai = Object.freeze(ai);
+    ai = f(ai);
     interns.set(ai, step);
     step.value = ai;
     return ai;
 };
 
+const memoize = f => {
+    let root = memoRoot.next(f);
+    return (...args) => internSeq(root, args, (a) => f(...a));
+};
+
+const internArray = a => internSeq(emptyArray, a, Object.freeze);
+
 const internObject = (obj) => {
     let step = emptyObject;
     for (const [k,v] of Object.entries(obj)) {
+        // k is a string (no need to call intern)
         step = step.next(k).next(intern(v));
     }
-    if (step.value) {
+    if (step.value !== UNSET) {
         return step.value;
     }
 
@@ -82,4 +94,7 @@ const intern = (value) => {
         value;
 };
 
-export { intern }
+export {
+    intern,
+    memoize,
+}

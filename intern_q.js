@@ -1,4 +1,4 @@
-import {intern} from "./intern.js";
+import {intern, memoize} from "./intern.js";
 import test from "./test.js";
 const {assert, eq} = test;
 
@@ -23,6 +23,8 @@ const ti = (v) => {
     }
 };
 
+// test intern
+
 ti(1);
 ti("abc");
 ti(true);
@@ -33,3 +35,18 @@ ti([]);
 ti([1, 2, 3]);
 
 ti({a: 1, b: 2, c: []});
+
+// test memoize
+
+let log = "";
+const f = (...args) => {
+    const v = args.join();
+    log += "(" + v + ")";
+    return v;
+};
+
+const mf = memoize(f);
+eq(mf(1,2,3), "1,2,3");
+eq(mf(1,2,3), "1,2,3");
+eq(mf(4,5), "4,5");
+eq(log, "(1,2,3)(4,5)");
