@@ -195,19 +195,22 @@ class Agent {
 
     onOpen(slot, oid, ...args) {
         const fn = this.caps[oid];
-        assert(typeof fn == "function");
         assert(this.updaters[slot] == null);
         const updater = activate(() => {
             let result;
-            try {
-                result = [0, use(fn(...args))];
-            } catch (e) {
-                const cause = rootCause(e);
-                if (cause instanceof Pending) {
-                    result = [1, cause.value];
-                } else {
-                    result = [2, cause.message || cause];
+            if (typeof fn == "function") {
+                try {
+                    result = [0, use(fn(...args))];
+                } catch (e) {
+                    const cause = rootCause(e);
+                    if (cause instanceof Pending) {
+                        result = [1, cause.value];
+                    } else {
+                        result = [2, cause.message || cause];
+                    }
                 }
+            } else {
+                result = [2, `No such function (${oid})`];
             }
             this.send(ropUPDATE, slot, ...result);
         });

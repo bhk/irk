@@ -5,37 +5,22 @@ import fs from "fs";
 import path from "path";
 import http from "http";
 import {WebSocketServer} from "ws";
-
-//----------------------------------------------------------------
-// ROP/WS Server
-//----------------------------------------------------------------
-
-let count = 0;
-
-class ServerAgent {
-    constructor(ws) {
-        let n = ++count;
-        this.ws = ws;
-        console.log(`WS ${n} (${ws.readyState})`);
-        // message handler: Message
-        ws.onmessage = evt => {
-            let msg = evt.data;
-            console.log(`${n}: ${msg}`);
-            ws.send(JSON.stringify(["Update", 0, "hi"]));
-        };
-    }
-};
+import {Agent} from "./rop.js";
 
 //----------------------------------------------------------------
 // HTTP & WebSocket Server
 //----------------------------------------------------------------
 
-let wss = new WebSocketServer({noServer: true});
+const initialFuncs = [
+    () => "Hello, world!",
+];
+
+const wss = new WebSocketServer({noServer: true});
 // The connection event is sent when WSS is standalone; we emit it ourselves
 // in the `noServer` use case for uniformity.
-wss.on('connection', (ws, req) => new ServerAgent(ws));
+wss.on('connection', (ws, req) => new Agent(ws, initialFuncs));
 
-let template = [
+const template = [
     "<!DOCTYPE html>",
     "<html lang=en>",
     "  <head>",
@@ -54,24 +39,24 @@ let template = [
     ""
 ].join("\n");
 
-let homeContent = template.replace(/SRC|TITLE/g,
+const homeContent = template.replace(/SRC|TITLE/g,
                                    match => (match == "TITLE"
                                              ? "ROP Demo"
                                              : "./client.js"));
 
-let extTypes = {
+const extTypes = {
     ".js": "text/javascript",
     ".txt": "text/plain",
 };
 
-let respondHtml = (resp, code, body) => {
+const respondHtml = (resp, code, body) => {
     resp.writeHead(code, {"Content-Type": "text/html"});
     resp.end(body);
 };
 
-let serveFile = (filePath, resp) => {
-    let ext = path.extname(filePath);
-    let contentType = extTypes[ext] || "text/html";
+const serveFile = (filePath, resp) => {
+    const ext = path.extname(filePath);
+    const contentType = extTypes[ext] || "text/html";
 
     fs.readFile(filePath, (error, content) => {
         if (error) {
@@ -83,8 +68,8 @@ let serveFile = (filePath, resp) => {
     });
 };
 
-let server = http.createServer( (request, resp) => {
-    let u = url.parse(request.url);
+const server = http.createServer( (request, resp) => {
+    const u = url.parse(request.url);
 
     if (request.method === 'GET' && u.pathname === '/') {
         return respondHtml(resp, 200, homeContent);
@@ -108,8 +93,8 @@ let server = http.createServer( (request, resp) => {
 });
 
 server.on('upgrade', (request, socket, head) => {
-    let { pathname } = url.parse(request.url);
-    if (pathname == "/orca" && request.headers.upgrade == "websocket") {
+    const { pathname } = url.parse(request.url);
+    if (pathname == "/rop" && request.headers.upgrade == "websocket") {
         wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
         });
@@ -118,8 +103,8 @@ server.on('upgrade', (request, socket, head) => {
     }
 });
 
-let addr = process.argv[2] || '127.0.0.1:8002';
-let hostPort = addr.match(/^([^:]*):?(.*)/);
+const addr = process.argv[2] || '127.0.0.1:8002';
+const hostPort = addr.match(/^([^:]*):?(.*)/);
 server.listen(hostPort[2], hostPort[1] || '127.0.0.1');
 
 console.log('Listening on ' + addr + ' ...');
