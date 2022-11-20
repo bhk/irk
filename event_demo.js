@@ -1,8 +1,11 @@
 import {
-    defer, use, mostRecent, newState, newStream, wrap, onDrop
+    defer, use, newState, wrap, onDrop, stream
 } from "./i.js";
 import {E, setProps} from "./e.js";
 import {run, log} from "./demo.js";
+
+const {newStream, fold} = stream;
+const mostRecent = fold((r,e) => e);
 
 //----------------------------------------------------------------
 // eventStream & dragStream
@@ -14,7 +17,7 @@ const eventStream = function (e, eventNames) {
     const stream = newStream();
     const $events = {};
     for (const name of eventNames) {
-        $events[name] = stream.append;
+        $events[name] = stream.emit;
     }
     setProps(e, {$events});
     return stream;
@@ -39,7 +42,7 @@ const getDragStreamFactory = wrap(() => {
         }
 
         if (activeStream != null) {
-            activeStream.append({
+            activeStream.emit({
                 type: (event.type == "mousedown" ? "down" :
                        event.type == "mousemove" ? "move" : "up"),
                 dx: event.pageX - eventDown.pageX,

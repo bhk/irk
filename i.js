@@ -12,6 +12,11 @@
 //    Pending             A class describes temporary failures
 //    checkPending(e)     value, if root cause of `e` was `new Pending(value)`
 //    rootCause(e)        Dereference `cause` in Error objects, transitively
+//    stream.newStream()
+//    stream.filter(f)(s)
+//    stream.map(f)(s)
+//    stream.fold(f,z)(s)
+//    stream.flatMap(f)(s)
 //
 // Low-level API: Used by imperative code
 //
@@ -19,13 +24,6 @@
 //    newCell()           Create new function cell
 //    onDrop(f)           Call f() when current cell's value is discarded
 //    activate(f)         Decouple evaluation of f(), without memoizing
-//
-// Experimental:
-//
-//    latch(v, fn)
-//    newStream()
-//    filterStream(stream, xform)
-//    mostRecent(stream, initial)
 //
 
 import {intern} from "./intern.js";
@@ -269,6 +267,7 @@ class FunCell extends Cell {
         this.key = key;          // const
         this.children = null;
         this.cleanups = null;
+        this.result = null;
     }
 
     // Return result & log this cell and its result as a depedendency of
@@ -538,35 +537,15 @@ const wrap = (f) => {
 };
 
 //------------------------------------------------------------------------
-// Latch
-//------------------------------------------------------------------------
-
-// Call `fn` passing it its previous return value (or `initial` the first
-// time it is called), an return its result.
-//
-const latch = (initial, fn) => {
-    // get/create map in current cell
-    let map = currentCell.latches;
-    if (map == undefined) {
-        currentCell.latches = map = new Map();
-    }
-
-    // Hack: use String(fn) as key...
-    const key = String(fn);
-    const newValue = fn(map.has(key) ? map.get(key) : initial);
-    map.set(key, newValue);
-    return newValue;
-};
-
-//------------------------------------------------------------------------
 // Streams
 //------------------------------------------------------------------------
 
-class StreamEntry {
-    // Append event (given this=tail) and return new tail.
-    appendEntry(evt) {
+class StreamPos {
+    // Destructively (!) add a new event, returning a new tail.
+    pushEvent(evt) {
+        assert(this.event == undefined);
         this.event = evt;
-        return (this.next = new StreamEntry());
+        return (this.next = new StreamPos());
     }
 
     forEachSince(prev, fn) {
@@ -574,65 +553,76 @@ class StreamEntry {
             fn(o.event);
         }
     }
-
-    getValuesSince(prev) {
-        const a = [];
-        this.forEachSince(prev, e => a.push(e));
-        return a;
-    }
 }
 
 // Create a writable stream (thunk & cell).
 //
-// stream.append(value) appends values to the stream.  It is a function and
+// stream.emit(value) appends values to the stream.  It is a function and
 // does not need to be invoked as a method.
 //
 const newStream = () => {
-    let tail = new StreamEntry();
+    let tail = new StreamPos();
     const stream = newState(tail);
 
-    stream.append = (value) => {
-        tail = tail.appendEntry(value);
+    stream.emit = (value) => {
+        tail = tail.pushEvent(value);
         stream.set(tail);
     };
     return stream;
 };
 
-// Generate one stream from another.  `xform` is passed an array containing
-// all new entries in `stream`; it returns an array of entries for the
-// resulting stream.
+// Return a cell whose value is `f` applied to sequential values in `xs`.
+// If the result type is StreamPos, this cell will itself be a stream.
 //
-// filterStream: Stream a -> ([a] -> [b]) -> Stream b
-// xform: [...a] -> [...b]
+// fold: (f, initialResult) -> Stream -> resultCell
+//    f: (prevResult, x) -> newResult
 //
-const filterStream = (stream, xform) => {
-    let tail = new StreamEntry();
-    let prevPos = null;
-
-    return newCell(_ => {
-        const pos = use(stream);
-        const current = xform(pos.getValuesSince(prevPos));
-        prevPos = pos;
-        for (const item of current) {
-            tail = tail.appendEntry(item);
+const fold = (f, z) => xs => {
+    let pos;
+    const xfn = () => {
+        let out = currentCell.result;
+        const oldPos = pos;
+        pos = use(xs);
+        if (oldPos == null) {
+            out = z;
+        } else {
+            pos.forEachSince(oldPos, x => {
+                out = f(out, x);
+            });
         }
-        return tail;
-    });
+        return out;
+    };
+
+    return new FunCell(xfn, []);
 };
 
-// The (lazy) most recent value in the stream.
+// Transform a stream.
 //
-const mostRecent = (stream, initial) => {
-    let prevPos = undefined;
-    let recent = initial;
-    return newCell(_ => {
-        const pos = use(stream);
-        pos.forEachSince(prevPos, item => {
-            recent = item;
-        });
-        prevPos = pos;
-        return recent;
-    });
+// flatMap: f -> Stream -> Stream
+// f: (streamPos, event) -> streamPos
+//    Appends zero or more events to the output stream, given
+//    an event from the input stream.
+//
+const flatMap = (f) => fold(f, new StreamPos());
+
+// Return a stream of selected elements from another stream.
+//
+// filter: f -> Stream -> Stream
+//      f: (streamPos, value) -> streamPos
+const filter = (f) => flatMap((s, x) => f(x) ? s.pushEvent(x) : s);
+
+// Return a stream of transformed elements from another stream.
+//
+// map: f -> Stream -> Stream
+//   f: value -> value
+const map = (f) => flatMap((s, x) => s.pushEvent(f(x)));
+
+const stream = {
+    newStream,
+    fold,
+    flatMap,
+    filter,
+    map,
 };
 
 //------------------------------------------------------------------------
@@ -735,18 +725,13 @@ export {
     checkPending,
     Pending,
     rootCause,
+    stream,
 
     // Low-level API
     newState,
     newCell,
     onDrop,
     activate,
-
-    // experimental
-    latch,
-    newStream,
-    filterStream,
-    mostRecent,
 
     // for testing & diagnostics
     getCurrentCell,

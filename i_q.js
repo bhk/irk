@@ -4,7 +4,7 @@ let {eq, assert} = test;
 
 import {
     defer, use, isThunk, wrap, useError, usePending, checkPending, Pending,
-    rootCause, newState, newCell, onDrop, activate, latch,
+    rootCause, newState, newCell, onDrop, activate, stream,
     getCurrentCell, setLogger
 } from "./i.js";
 
@@ -197,15 +197,18 @@ let rootChildrenSize = (root.children ? root.children.size : 0);
     eq(undefined, checkPending(null));
 }
 
-// latch
+// stream.*
 
 {
-    let s1 = newState(1);
-    let f = () => {
-        return latch(0, n => n + use(s1));
-    }
-    const cell = newCell(f);
-    eq(1, use(cell));
-    s1.set(2);
-    eq(3, use(cell));
+    let s = stream.newStream();
+    let smap = stream.map(n => n*2)(s);
+    let sfilt = stream.filter(n => n <= 4)(smap);
+    let sfold = stream.fold((v, n) => v + ":" + n, "")(sfilt);
+    eq(use(sfold), "");
+    s.emit(1);
+    s.emit(3);
+    s.emit(2);
+    eq(use(sfold), ":2:4");
+
+    sfold.deactivate();
 }

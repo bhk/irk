@@ -3,7 +3,7 @@
 import E from "./e.js";
 import {handleDrag} from "./drag.js";
 
-import {defer, use, mostRecent, newState, onDrop} from "./i.js";
+import {defer, use, newState, onDrop} from "./i.js";
 
 const max = (a,b) => a<b ? b : a;
 
