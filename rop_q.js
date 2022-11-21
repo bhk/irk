@@ -1,7 +1,7 @@
 import { connect, flushEvents } from "./mockdom.js";
 import {
     use, wrap, activate, useError, usePending, Pending, checkPending,
-    newCell, newState, logCell, getCurrentCell
+    newCell, newState, logCell, getCurrentCell, setLogger
 } from "./i.js";
 import { Agent, Pool, makeEncoder, makeDecoder } from "./rop.js";
 import test from "./test.js";
@@ -142,11 +142,13 @@ const remote = (name) =>
     serverState1.setError(new Pending("stalled"));
     flushEQ(cell, [false, new Pending("stalled")]);
 
+    const oldlogger = setLogger(() => null);
     // ASSERT: other errors propagate to client side (message only)
     serverState1.setError("broken");
     flushEQ(cell, [false, "broken"]);
     serverState1.setError(new Error("ebroken"));
     flushEQ(cell, [false, "ebroken"]);
+    setLogger(oldlogger);
 
     // ASSERT: observation is closed and resources are cleaned up
     serverState1.set("ok");

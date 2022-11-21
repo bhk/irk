@@ -123,14 +123,14 @@ const checkPending = (error) => {
     }
 };
 
-let showRootErrors;
+let logRootError;
 
 // Force evaluation and throw if value is in error state.
 //
 const use = (value) => {
     value = unthunk(value);
     if (value instanceof CellException) {
-        showRootErrors(value.error);
+        logRootError(value.error);
         throw new Error("used error value", {cause: value.error});
     }
     return value;
@@ -460,19 +460,19 @@ class RootCell extends FunCell {
 const globalRoot = new RootCell();
 currentCell = globalRoot;
 
-// Display error causes if we are throwing an error outside of a cell.  When
-// an error is not caught, browsers will display an error in the console but
-// most will fail to display the stack traces for the `cause` errors, which
-// are crucial for understanding what's going on.
+// Log an error description, including all errors in the cause chain.
 //
-// Also, elide stack entries that originiate from this file.
+// Also, elide stack entries that originate from this module.
 //    Chrome:     at use (http://ORIGIN/i.js:139:13)
 //    Safari: use@http://ORIGIN/i.js:139:20
 //   Firefox: use@http://ORIGIN/i.js:139:13
 //
-const showErrorCauses = (e) => {
+const logError = (e, desc) => {
+    if (desc) {
+        log("*** " + desc + ":");
+    }
     if (e.cause) {
-        showErrorCauses(e.cause);
+        logError(e.cause);
     }
     let stack = e.stack;
     if (stack) {
@@ -487,10 +487,14 @@ const showErrorCauses = (e) => {
     }
 };
 
-showRootErrors = (e) => {
+// Log an error if we are outside of any cell.  When an error is not caught,
+// browsers will display an error in the console but most will fail to
+// display the stack traces for the `cause` errors, which are crucial for
+// understanding what's going on.
+//
+logRootError = (e) => {
     if (currentCell == globalRoot) {
-        log("-- Error caught at root:");
-        showErrorCauses(e);
+        logError(e, "Error caught at root");
     }
 };
 
@@ -738,4 +742,5 @@ export {
     logCell,
     valueText,
     setLogger,
+    logError,
 };

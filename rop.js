@@ -32,8 +32,9 @@
 //
 
 import {
-    use, onDrop, wrap, activate, Pending, rootCause,
-    newState, valueText,
+    use, onDrop, wrap, activate, Pending, rootCause, newState,
+    valueText,
+    logError,
 } from "./i.js";
 
 // Protect against pollution of global namespace.  This module should work
@@ -206,6 +207,9 @@ class Agent {
                     if (cause instanceof Pending) {
                         result = [1, cause.value];
                     } else {
+                        // This situation can be confusing.  Stopping the
+                        // server is maybe not ideal. For now, log to stdio.
+                        logError(e, "Error in observer");
                         result = [2, cause.message || cause];
                     }
                 }
