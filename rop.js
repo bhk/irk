@@ -261,6 +261,7 @@ class Agent {
             this.log && this.log(`post ${msg}`);
             this.sendQueue.push(msg);
         } else {
+            // TODO: re-establish connection
             throw new Error(`send in bad state: ${this.ws.readyState}`);
         }
     }

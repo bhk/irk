@@ -1,6 +1,6 @@
 // ROP/WS client for the brower environment
 
-import {use, activate, rootCause, Pending} from "./i.js";
+import {use, activate, rootCause, usePending, Pending} from "./i.js";
 import {E, setProps, setContent} from "./e.js";
 import {Agent} from "./rop.js";
 
@@ -11,6 +11,9 @@ const activatePending = (fn) => activate(() => {
         let cause = rootCause(e);
         if (cause instanceof Pending) {
             console.log("Pending:", cause.value)
+        } else {
+            console.log(e);
+            throw e;
         }
     }
 });
@@ -26,8 +29,10 @@ let ws = new WebSocket("ws://localhost:8002/rop");
 let agent = new Agent(ws);
 
 let main = () => {
-    let f = agent.getRemote(0);
-    setContent(document.body, [ f() ]);
+    let recentKeys = agent.getRemote(1);
+    let [done, value] = usePending(recentKeys());
+    let str = done ? value : "Pending...";
+    setContent(document.body, [ String(str.length), ": ", str ]);
 };
 
 activatePending(main);

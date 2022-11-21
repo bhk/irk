@@ -6,6 +6,45 @@ import path from "path";
 import http from "http";
 import {WebSocketServer} from "ws";
 import {Agent} from "./rop.js";
+import {use, wrap, onDrop, newState, newCell} from "./i.js";
+
+
+const recentKeys = wrap(() => {
+    const duration = 3000;
+    console.log("Hello!");
+
+    let text = newState([{t: Date.now(), data:"Start!"}]);
+    const updateText = (data) => {
+        let now = Date.now();
+        let old = now - duration;
+        let a = text.result.filter(e => e.t > old);
+        a.push({t: now, data});
+        text.set(a);
+    };
+    setTimeout(() => updateText(""), duration);
+
+    const kbdata = (data) => {
+        if (data == "\x03") {
+            stdin.setRawMode(false);
+            process.exit();
+        }
+        updateText(data);
+        setTimeout(() => updateText(""), duration);
+    };
+
+    const stdin = process.stdin;
+    stdin.setRawMode(true);
+    stdin.setEncoding("utf8");
+    stdin.on("data", kbdata);
+    onDrop(() => stdin.off("data", kbdata));
+
+    return newCell(() => {
+        const str = use(text).map(e => e.data).join("");
+        process.stdout.write("\r" + str + "   \x08\x08\x08");
+        return str;
+    });
+});
+
 
 //----------------------------------------------------------------
 // HTTP & WebSocket Server
@@ -13,6 +52,7 @@ import {Agent} from "./rop.js";
 
 const initialFuncs = [
     () => "Hello, world!",
+    recentKeys,
 ];
 
 const wss = new WebSocketServer({noServer: true});
