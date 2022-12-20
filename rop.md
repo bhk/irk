@@ -20,9 +20,9 @@ and write code to construct and de-construct those messages.
 ### RPC: The Procedure Analog
 
 The Remote Procedure Call (RPC) model abstracts the communication layer away
-as a set of procedure calls.  This allows programs to use the communication
-layer by implementing ordinary procedures in one domain and then calling
-them from code in another domain.
+as a set of procedure calls.  Once this is done, communicating with another
+program is as easy as calling a procedure.  [Well, sort of.  See caveats,
+below.]
 
 This involves **proxy** software on both sides of the communication channel.
 In the caller's domain, there is an procedure that looks like the
@@ -45,6 +45,32 @@ The keys benefits of RPC are:
 
 - Interoperability: Functions that are accesible via RPC may also be
   accessible locally without the communication layer.
+
+Caveats:
+
+ - Since communication layers are, in general, impermanent, some provision
+   must be made for dealing with temporary or permanent failure.  One option
+   is to terminate the communicating programs.  Short of that, we must
+   acknowledge that remoted functions differ from local functions in that
+   they may fail for exogenous reasons, and require them to return a value
+   or throw an exception that indicates failure (along with whatever
+   results/exceptions it would have as a local function.)
+
+ - Threading and re-entry.  When a local procedure is called, it may
+   (synchronously) call other local procedures using the same thread.
+   Depending on the RPC implementation, the analogous behavior may or may
+   not be preserved.  Some possibilities that arise are: (a) a thread
+   awaiting a remote function result will do nothing but wait for the
+   result; (b) a thread awating a remote function will be available to
+   handling arbitrary incoming remote calls; (c) a thread will accept
+   incoming invocations, but only from the remote thread that is handling
+   the outbound call it is awating.
+
+   In case (a), any re-entrant call will require a multi-threaded
+   environment.  Case (b) can lead to unintended blocking, where a thread is
+   not available to handle the incoming result because it is handling an
+   incoming call that has not completed.
+
 
 ### RPC Protocol
 
@@ -157,10 +183,12 @@ protocol or implementing the infrastructure:
    - inter-process
    - network (sockets, HTTP, ssh, ...)
 * Security Concerns
-   - peer-to-peer vs. parent-child domains
-   - leakage (padding)
-   - validation (alignment, bounds, etc.)
    - capabilities & confused deputy
+   - leakage of data (padding)
+   - leakage of capability (e.g. get prototype of X, modify prototype)
+   - peer-to-peer vs. parent-child domains
+   - validation (types, bounds, etc.)
+   - unsafe language concerns (pointers, indices, alignment,...)
 
 
 ## ROP: Reactive Observation as an Analog
@@ -423,6 +451,49 @@ WebSockets.
 * Group messages into packets
 * Sequence numbers for packets (each side)
 * Explicit packet ACK
+
+
+### Logic
+
+state = {
+  observers: [],
+}
+
+   handleMessageEvent = (state, event) -> state where match event:
+      Open(slot, oid, ...values) =>
+         # create observer that sends updates on change
+         # todo: only send when pending ack < N
+
+      Close(slot) =>
+         # deactivate observation
+
+      AckUpdate(slot) =>
+         # decrement pending acks
+
+      Update(slot, value) =>
+         # set forwarder
+
+      AckClose(slot) =>
+
+      Error(name) =>
+
+   handleClientEvent = ...
+
+      # Creation? Activation?
+      NewForward(oid, values) =>
+         allocate slot
+         send Open(slot, oid, vaues)
+         fwdrs[slot] = new state cell
+         state cell on drop emits DropForward(slot)
+
+      DropForward(slot) =>
+
+
+handleObserverEvent = (state, event) -> state where:
+
+
+
+
 
 
 ----------------------------------------------------------------

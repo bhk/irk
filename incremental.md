@@ -10,6 +10,7 @@
     - Cell Boundaries
     - Exceptions
     - State Cells
+    - Streams
   - Implementation Notes
     - Minimal Update Algorithm
     - Parallel Processing of Updates
@@ -33,8 +34,8 @@
 
 Incremental evaluation refers to various strategies for performing a
 computation in such a way that, after a small or isolated change in some of
-the inputs, the new result can be computed more efficiently than by
-performing the entire computation from scratch.
+the inputs, a new result can be computed more efficiently than by performing
+the entire computation from scratch.
 
 Most programmers are familiar with spreadsheets and build systems, which
 despite all of their differences (see [SURVEY], below, for a more thorough
@@ -42,19 +43,19 @@ discussion) are essentially concerned with enabling incremental evauation.
 At their heart, these systems manage a set of values, some of which are
 described in terms of computations that make use of other values, and they
 allow recomputation to proceed efficiently and automatically after one or
-more of the value have been modified.  "Automatic" means that they do not
-require the user to manually indicate which values must be recalculated, nor
-do they require the user to write code to programmatically identify what
-must be updated.
+more of the values have been modified.  "Automatic" means that these systems
+do not require the user to manually identify the values that must be
+recalculated, nor do they require the user to write code to programmatically
+identify what must be updated.
 
-Our purpose for using incremental evaluation is to construct entire programs
-and systems in a "reactive" style.  In this approach, we model the current
+Our purpose for using incremental evaluation is to construct general-purpose
+programs in a "reactive" style.  In this approach, we model the current
 state of the external world as a set of inputs, and our program maps these
 inputs to an output value.  This output value describes a set of changes to
 effect, such as a visual representation to be displayed to a user, or a set
 of modifications to be made to files or databases.  As the state of the
 world evolves over time, the relevant parts of the program are re-evaluated
-as necessary, and the resulting outputs are applied.
+incrementally, and the resulting outputs are re-applied.
 
 Our motivation is to eliminate from our program the need to deal directly
 with updates and notifications.  The burden of propagating and handling
@@ -65,53 +66,103 @@ complexity manifests, but for now consider an everyday example that might
 resonate with many people: compare the complexity of a script that prepares
 a static report, say in HTML, from a set of database queries, to an
 analogous script in a browser that presents a "live" visual version of the
-same report that updates continuosly and efficiently.
+same report that updates continuously and efficiently.
 
 
-## Dependency Graph Concepts
+## Dependency Graphs
 
-A computation can be described as a set of **cells**.  Each cell has a
-**value** and a list of other cells called **dependencies**.  Our term cell
-corresponds to "cells" in spreadsheets, and to "rules" in Make and other
-build systems.  Cells and their dependencies describe a directed acyclic
-graph called the dependency graph.
+We model an incremental computation as a function of one or more inputs,
+yielding a single value.  This computation can be decomposed into a set of
+irreducible computations that consume one or more values and produce values.
+Together with the input values, these form the nodes of a dependency graph.
 
+After an input changes, nodes that depend on it have to be recomputed.  In
+turn, when the result of that computation changes, nodes that depend on it
+must be recomputed.  Nodes whose dependencies remain unchanged do not have
+to be recomputed.
+
+### Terminology
+
+We refer to nodes in the grap as **cells**.  Nodes that have dependencies
+are **function cells**, and nodes that represent external inputs that might
+change are called **input cells**.  Cells correspond to "cells" in
+spreadsheets, and to "targets" in Make and other build systems, and function
+cells correspond to "rules" in build systems.
+
+Each cell has a **value** and a list of other cells called **dependencies**.
 We sometimes refer to dependencies of a cell as its **children**, and the
 cell(s) that depend upon it **parents**.
 
-A **leaf cell** contains just a value and has no dependencies.  It may
-change over time based on external events.
-
-A **function cell** describes a computation.  It consumes values produced by
-other cells and produces its own value.  Execution of function cell yields a
-value and a list of dependencies.  This allows for the dependency graph to
-have a dynamic nature: it may change over time as the values change.  We
-require that execution of a function cell has no side effects and is
-deterministic; it is a "pure" function.
-
-A **root** cell describes a program; while the program is "running" is
-result value is repeatedly **updated**.  Updating a cell involves
+The entire graph describes a **program**.  All cells are descendants of a
+**root** cell.  While the program is "running", whenever inputs to the
+program change its root cell is **updated**.  Updating a cell involves
 determining the current value of the cell.  In the case of a function cell,
 this might involve **recalculating** the cell -- executing its code -- or it
 might just involve verifying the continued validity of the previously
 computed value.  Each update of the root is called a **cycle**.
 
-We say that a value has **changed** when its value, after any recalc to be
-performed in the current cycle, differs from that of the previous cycle.
+### Dynamic Dependencies
 
-A function cell is **invalid** when one or more of its *immediate*
-dependencies have changed.  After an invalid function cell is recalculated,
-it will be found to be either changed or unchanged.
+When a function cell is recalculated it might make use of different set of
+cells than it used in the previous cycle.  During evaluation of a function
+cell we track what other cells it accesses.  When its evaluation complete,
+we arrive at not just the resulting value, but also a set of dependencies
+that were used in computing that value.
 
-A cell is **live** when it is a root or a transitive dependency of a root
-(in the current cycle).
+Supporting dynamic dependencies is crucial for applying incremental
+evaluation to general purpose programming.
 
-Cells have an associated **dirty bit**.  After an update, every cell in the
-graph is **clean** (its dirty bit is false).  Between update cycles, changes
-(or *potential* changes) to a external state will mark as dirty the affected
-leaf cells *and all cells that depend on them, transitively*.  Dirty state
-therefore reflects the notion that the cell must be updated (we must
-determine its validity and recalc if necessary).
+### Update Algorithm
+
+First, two more definitions.  During an update cycle, a cell is **live** if
+it will remain in the dependency graph when the update completes, and a cell
+is considered **invalid** if the values of one or more dependencies has
+changed from that of the previous cycle.
+
+We can now state a couple of requirements for our algorithm that updates the
+graph:
+
+1. Consistency.  The resulting graph and values must match what would result
+   from a "from scratch" (non-incremental) computation with the same input
+   values.
+
+2. Minimality.  The update algorithm must update only live and invalid nodes.
+
+Achieving minimality is complicated by dynamic dependencies.  To establish
+invalidity, in general we must update children before parents.  To establish
+liveness, in general we must update parents before children.
+
+This logjam can be broken by tracking the order in which dependencies are
+used by a cell.  The first dependency of a live cell must itself be live,
+since nothing has changed that could affect its presence.  When the first
+dependency's value is unchanged, we know the second dependency will remain
+be live.  By induction, a child of a live cell is *live* when all prior
+siblings are *unchanged*.
+
+Therefore, when we know a cell is live, we can proceed to either (a) update
+all its children, finding them unchanged, or (b) discover that a child has
+changed, which shows that the cell is invalid, and must be recalculated.
+
+Our update algorithm can begin at the root, which we know is always live.
+
+A word on recalculation: During calclucation of a cell, we intercept its
+references to other cells.  If a matching cell exists in the dependency
+graph, we supply that cell (updating it if necessary).  Otherwise, we create
+and evaluate the cell it references.
+
+### Parallel Updates
+
+The preceding algorithm discussion assumes a sequential or single-threaded
+model of computation.  We can capture the potential for concurrency in our
+dependency graph by introducing two types of dependencies: construction and
+use.  A construction dependency means that the parent initiates evaluation
+of the child (if it has not already begun), and a use dependency means that
+the parent consumes the value of the child (after waiting for its
+completion).
+
+In order to construct such a dependency graph, during evaluation of cells we
+must track construction and use separately.  This may be enabled by explicit
+annotations made by the programmer, or by analysis performed by the compiler.
 
 
 ## Programming with Cells
@@ -136,11 +187,11 @@ calculation completes, we have not only the value is produced, but a list of
 dependencies (cells that were accessed during its execution).
 
  - In JavaScript, cells are objects.  The library provides a function called
-   `use` that is used to access the cell's.  When a cell is accessed, it
-   adds itself to the list of dependencies of the "current" cell (the one
-   performing the access).  If `use` is passed a non-cell argument, it
-   returns the argument unchanged; this allows code to be written that can
-   accept either cells or ordinary values.
+   `use` that is used to access the value of a cell.  When a cell is
+   accessed, it is added to the list of dependencies of the "current" cell
+   (the one performing the access).  [If `use` is passed a non-cell
+   argument, it returns the argument unchanged; this allows code to be
+   written that can accept either cells or ordinary values.]
 
  - In IFL, we have our interpreter keep track of these dependencies.  Values
    in our language can be ordinary ("static") values, or "dynamic" values,
@@ -154,6 +205,7 @@ dependencies (cells that were accessed during its execution).
    point of view of the cell being executed, the dynamic value is
    indistinguishable from the static value produced by its cell in that
    cycle.
+
 
 
 ### Cell Boundaries
@@ -274,10 +326,59 @@ If `set` is called during an update cycle -- while another cell is being
 recalculated -- this will be detected and a fatal error will be thrown.
 
 
+### Streams
+
+When dealing with inputs like keyboard events, network events, and so on, we
+need to keep track of potentially many events that occur between update
+cycles.  For this we introduce the notion of a *stream*.  A stream is a cell
+that represents a sequence that accumulates events indefinitely.  Since we
+want to be able to reclaim memory, a stream does not allow arbitrary access
+to any event in history.  Instead, the current value of a stream is an
+abstract "marker" that identifies a position in the stream.  When we hold
+two marker values, we can then obtain the events that occurred between those
+two positions.
+
+We then can construct the following derived streams that are nicely defined
+as functions of the input stream:
+
+ * `fold(f, z)(xs)` : A cell whose current value is `f` applied to all the
+   values in the stream `xs`.
+
+ * `filter(f)(xs)` : A stream of selected values from `xs`.
+
+ * `map(f)(xs)` : A stream of transformed values from `xs`.
+
+One complication in the functional description is that streams only begin
+delivering events when they are observed.  They beginning of time, for each
+stream, is when it gets added to the dependency graph.
+
+[Only JavaScript APIs are described here.  How to approach this in IFL is
+TBD.]
+
+
 ## Implementation Notes
 
 
-### Minimal Update Algorithm
+### Update Algorithm
+
+Cells have an associated **dirty bit**.  After an update, every cell in the
+graph is **clean** (its dirty bit is false).  Between update cycles, changes
+(or *potential* changes) to an input cell will mark as dirty the affected
+input cells *and all cells that depend on them, transitively*.  Dirty state
+therefore reflects the notion that the cell must be updated (we must
+determine its validity and recalc if necessary).
+
+We say that a cell is **invalid** when one or more of its *immediate*
+dependencies have changed.  Being invalid means that the cell must be
+recalculated, but does not necessarily mean that its value will change.  We
+say that a cell has (or is) **changed** when its updated value differs from
+its value in the previous cycle.
+
+A cell is **live** when it is a root or a transitive dependency of a root
+(in the current cycle).
+
+We can state
+
 
 We consider the work done during a update **minimal** when it recalculates
 function cells only when they are invalid and live (in the curent cycle).
@@ -793,36 +894,26 @@ We can describe some properties of these systems:
 Given a dependency graph, there are two common approaches to assessing the
 need for recomputation of a cell:
 
- * *Notifications*: One approach is to consider a leaf cell *dirty* if any
-   writes to it (potential changes) have occcured since the last
-   (re-)evaluation.  If the system is aware of writes as they happen, it can
-   maintain a dirty bit for each leaf cell.  If the leafs are all files in a
-   file system that tracks modification times, those timestamps can be used
-   to detect this "dirty" state when re-evaluation is performed.  On
+ * *Notifications*: One approach is to consider a input cell *dirty* if any
+   potential changes (e.g. writes) have occcured since the last
+   (re-)evaluation.  If the system is aware of changes as they happen, it
+   can maintain a dirty bit for each input cell.  If the inputs are all files
+   in a file system that tracks modification times, those timestamps can be
+   used to detect this "dirty" state when re-evaluation is performed.  On
    re-evaluation, the system will recompute every function cell that depends
    (transitively) on a dirty cell.
 
-   [GNU make diverges from this strategy in that it does not necessarily
-   re-evaluate all nodes that transitively depend on dirty leaf nodes.  In
-   Make terminology: a rule's command will be issued when its inputs are
-   newer than its output file.  We might have some rule whose "grandparent"
-   dependency has changed, but whose "parent" (immediate) dependency has not
-   changed.  This will occur only if the parent rule's command did not
-   update the output file (even though it was invoked).  This appears to be
-   an un-useful, pathological case, so we leave this approach outside of the
-   design landscape we're surveying.]
-
- * *Equality Testing*: Another approach is to record the value of each leaf
-   cell and function, or a strong hash of the value.  On re-evaluation, a
-   cell's current value is compared with its previous value (perhaps
-   employing hashes) to determine whether it has changed.  On re-evaluation,
-   a function cell will be recomputed when one or more of its *immediate*
-   dependencies has changed.  This will allow us to avoid unnecessary
-   recomputation if we process the nodes in a bottom-up fashion (visiting
-   the dependencies of a node before the node itself).  [In [BSalC], the set
-   of previous values is called a "trace" and the term "early cutoff" refers
-   to avoiding of re-calculation of nodes whose transitive dependencies have
-   changed, but whose immediate dependencies have not.]
+ * *Equality Testing*: Another approach is to record the value of each cell,
+   or a strong hash of the value.  On re-evaluation, a cell's current value
+   is compared with its previous value (perhaps employing hashes) to
+   determine whether it has changed.  On re-evaluation, a function cell will
+   be recomputed when one or more of its *immediate* dependencies has
+   changed.  This will allow us to avoid unnecessary recomputation if we
+   process the nodes in a bottom-up fashion (visiting the dependencies of a
+   node before the node itself).  [In [BSalC], the set of previous values is
+   called a "trace" and the term "early cutoff" refers to avoiding of
+   re-calculation of nodes whose transitive dependencies have changed, but
+   whose immediate dependencies have not.]
 
 
 #### Note: Result Caching
@@ -878,7 +969,7 @@ its own map of the design space with its own terminology:
    - Constructive Verifying traces: Equality testing with "memoization".
 
    - Deep constructive traces: This strategy applies equality testing to
-     leaf nodes, not immediate dependencies, sacrificing the liveness
+     input nodes, not immediate dependencies, sacrificing the liveness
      property of minimality we describe above, in order to perform
      speculative computation of some cells (in parallel, presumably).
 
@@ -951,17 +1042,95 @@ constructed from arguments, uniquely identifies each cell.
 
 ### TODO
 
- * Summary
+ * Modes of Evaluation
 
    A "cell" corresponds to an *evaluation* of an expression in an
-   *incremental* mode.  Various modes a language might support:
+   *incremental* mode.  A language might support other modes of evaluation:
 
      - Strict: evaluate when constructed.
-     - Lazy: evaluate when value is used.
-     - Concurrent: start on construction, join on use.
-     - Incremental: reuse in next update cycle.
+     - Lazy: evaluate when used.
+     - Concurrent: evaluate in parallel, join on use.
+     - Incremental: potentially reuse across update cycles.
+     - Batch: evaluated in parallel, report status on use.
 
-   Incremental may be combined with strict/lazy/concurrent.
+   Concurrent and lazy produce the same results and differ only in
+   performance, if at all.  With compute-bound tasks on a single CPU they
+   are equivalent.  An unused lazy expression is never evaluated; an unused
+   concurrent expression will be discarded, if it has been initiated.
+   Sequential (non-concurrent) lazy would satisfy the semantic requirements
+   of concurrent.
+
+   "Batch" expressions are concurrent expressions that will report a
+   "pending" state when executing but not blocking.  This introduces
+   indeterminism, due to unpredictable external inputs (execution time).
+   Note that a concurrent cell may enter a pending state (i.e. use a pending
+   value), but will not become pending otherwise.
+
+      WRT the update cycle: the entire cycle will await the result of
+      concurrent node, but not a concurrent node.  However, that is
+      undesirable in that the program is fragile w.r.t. unintended
+      long-running functions.  Instead, we could place a time limit on the
+      entirety of the update cycle, and "time out" non-batch cells
+      (concurrent or incremental), putting them in pending state.
+
+   Incremental expressions differ along an orthogonal dimension: introducing
+   a cell wall for segregating dependencies, caching results, and catching
+   exceptions.  It would make sense to combine this with strict, lazy,
+   concurrent, and batch: eval on construction vs. eval on use, etc.  We
+   might say strict/lazy/concurrent address the execution or sequencing
+   aspects, while incremental addresses the containment aspect.
+
+ * "Monads" parallel
+
+   Haskell uses monads for encapsulating these execution aspects
+   (sequencing, parallelism, side effects, etc.)  Perhaps this suggests a
+   way of modeling the different evaluation modes -- the "under the hood"
+   code that handles execution order, etc., without polluting the "surface"
+   code with types and structural changes.
+
+   At the surface, we simply surround a subexpression with a mode modifier.
+   Under the hood, the mode modifier controls how the expression is
+   converted to a value.  These domains interact at (a) construction of
+   wrapped expressions, (b) `use`.  In eval, this interaction could be
+   placed at the host layer (it certainly intrudes on such as currently
+   defined since the notion of value expands to "Actual v | ThunkX e".)
+   Whether it inflitrates the host layer or not, it still *surrounds* the
+   interpreter logic and ties it to the enclosing environment ... and
+   ultimately can be quite complex, since it deals with threading, external
+   state, exceptions, and so on.
+
+   --
+
+   Notes:
+
+      M is a type constructor
+      `M T` is a monadic type
+
+      return :: a -> M a                          aka unit
+      bind ::  (M a) -> (a -> M b) -> M b         aka map, flatmap (andThen?)
+
+     Example:
+
+      data MS = Result string pos captures
+
+      p : (ms, str) -> Maybe MS
+      p (Result s os caps, str) =
+         s.begins(str) ?
+
+      do x <- readchar
+         return x
+
+      bind readchar (x -> return z)  :: M b
+
+      readchar >>= (x -> return z)
+
+ * Blocking <-> Throwing?
+
+   A "use" of a concurrent cell will block until the cell completes.
+   Blocking puts the current cell in a "pending" exception state.
+   Restarting/resuming execution of blocked code is ultimately the same as
+   restarting after a cell incrementally changes from an error state to
+   non-error.
 
  * Reactive GC
 
@@ -972,8 +1141,7 @@ constructed from arguments, uniquely identifies each cell.
     - Inputs magically appear over time
     - Outputs... ????
 
-
- - Function arguments to memoized functions:  need to encapsulate them?
+ * Function arguments to memoized functions:  need to encapsulate them?
 
     Scenario A: Filesystem getter with persistent ID;
       pre-encapsulated. (How?)
@@ -982,14 +1150,14 @@ constructed from arguments, uniquely identifies each cell.
       This has no persistent ID, so each re-eval of caller will discard
       the chid cell.  (No difference.)
 
- - Persistent state.  For UI elements, provide a constructor that accepts an
+ * Persistent state.  For UI elements, provide a constructor that accepts an
    "instance state" parameter, which can at minimum provide the UI event
    stream for the element.  Instance state describes instantiation in the
    GUI layout, and has a notion of identity of the visual representation.
    Interestingly, many properties of the UI element are functions of event
    stream... a circularity that was not clearly apparent before.
 
- - Pseudo-code...
+ * Pseudo-code...
 
    getValue = (cell, trace) ->
        # Always: cell is live
@@ -1005,3 +1173,230 @@ constructed from arguments, uniquely identifies each cell.
        # Always: cell is live, cell is invalid
        [value, ndl] = cell.traceExec()
        [value, trace.replace(cell, [value, ndl])]
+
+ * Functional model of the incremental/reactive system
+
+   Define the "functional model" as the assertion that, at any point in
+   time, output is pure function of current value of its inputs.  This means
+   that the dependency graph can be viewed as a function, and has no
+   internal state.
+
+   Recalculation occurs only during update cycles. An input cell might
+   change many times between update cycles, but the value cannot change
+   *during* an update cycle.  When an update cycle occurs, if its value is
+   the same as the value it had in the previous cycle, it will not be
+   considered invalid.  Any other intervening values it held between cycles
+   are irrelevant; they have no effect on the result of the update cycles.
+
+ * Dataflow primitives
+
+   delta/usePrev (dataflow language primitive)
+
+      usePrev(cell) --> value of cell in previous cycle
+      delta(stream) --> intervening values
+
+      They fit more easily into a synchronous (clocked) model than an asynch
+      model, because they introduce a dependency on the previous value
+      (which may change out of synch with the current value):
+
+         cell:     A    B    B    B    C    C
+         prev:     -    A    B    B    B    C
+         delta:    A   B-A   0    0   C-B   0
+                             ^              ^
+         fold:     X    Y    Y    Y    Z    Z
+
+      Each input transition introduces *two* usePrev or delta transitions.
+      Fold/flatMap, on the other hand, does not incur the need for this
+      extra update cycle.
+
+ * "Newer" vs. changed/dirty
+
+   In GNU Make: a rule's command will be issued when its inputs are newer
+   than its output file.
+
+   We might have some rule whose "grandparent" dependency has changed, but
+   whose "parent" (immediate) dependency has not changed.  This will occur
+   only if the parent rule's command did not update the output file (even
+   though it was invoked).
+
+   This is a strange case.  Presumably the parent rule ran and concluded
+   that its result does not need to change, thereby avoiding the need to
+   invoke current rule's command.  But this leaves the parent in an invalid
+   state, so its command will continue to be invoked on subsequent builds.
+
+
+ * Directed Fan-out
+
+   A single cell might fan out into multiple cells in ways that can be
+   optimized with non-reactive approaches, but apparently not with reactive
+   ones.
+
+   Consider an cell that emits a stream of random numbers, one per second,
+   and that is observed by many "counter" cells, each of which counts the
+   number of occurrences of a different random number.  Every second, even
+   though only one of the counters will actually change, the stream will
+   mark all the counters dirty (and their parents, and so on).  Every
+   counter's recalc will be called, wherein it will inspect the event and
+   determine whether to increments its value.
+
+   The dirtying is at least as costly as the recalcs.  Many other downstream
+   cells will be dirtied (but not recalculated).  Consider a UI rendering
+   server-resident objects, all of which are retrieved via a WebSocket... in
+   this case, every WebSocket event will invalidate every cell in the
+   dependency graph.
+
+   In order to reduce the overly broad dirtying, we must perform some
+   computation prior to dirtying.  This presents a conundrum, since we want
+   all computation to be done during an update, and we rely on dirtying to
+   be completed before each update.  Dirtying cells *during* an update would
+   not only complicate the update algorithm, it would disrupt ordering of
+   recalculations, so a cell might be recalculated multiple times in a
+   single cycle, or recalculated in a cycle when it is no longer live.
+
+   We can solve this by desynchronizing the counters from the stream.
+
+   a) Queue 'set's
+   b) Decouple recalc path from liveness path
+
+   *** Revisit update algorithm (& parallelism discussion) (& opt) with
+       knowledge of parallel cells!
+
+    - Mark cells as parallel (begin eval on construction, wait on use?)
+    => eval not driven by using cell
+    => risk of eval uncreachable code?
+
+
+   Parallel Processing:
+
+    - Cells can be marked as parallel
+        - construction begins, `use` waits
+        - Liveness depends on constructing cell(s)
+        - Invalidates using cell(s)
+        - Dirties using cell(s)
+
+      For c in constructors, u in users:  c <= u   [w.r.t. ordering]
+
+   Update algorithm:
+
+   Terminology: cell, parent, child, dirty, invalid
+   Model: update, change, update, ...
+   Requirements: Consistency, Minimality
+
+         Root is live
+         First child of a live cell is live
+         Child whose older siblings are valid is live
+          - Older siblings have been freshened and unchanged,
+            or are not used (void, or parallel)
+
+         Pick a live dirty cell and freshen it
+          - freshen
+
+         Don't recalc a cell unless we know it is live
+            Parent is live
+            Older siblings are live
+
+
+
+         While a cell is dirty (transitively):
+            if a cell is invalid:
+               recalc it
+            else:
+               get first dirty
+               if its inputs have changed, recalc
+               mark it clean
+
+
+   One "solution" would be to de-synchronize the counters from the stream.
+   Each counter would become a state cell, and the processing of the random
+   stream and modification of the states would be processed in a separate
+   cell that observes the stream and *sets* the appropriate counter.  This
+   processing cell will have a lifetime and liveness of a child of the
+   counters, but it will not dirty them and not be updated by them.
+   Instead, the (a?) root cell will updated it ... and not control its
+   lifetime/liveness.
+
+   During an update cycle,
+
+
+----------------------------------------------------------------
+
+## Dependency Graph vis-a-vis Memoization
+
+Each cell is analogous to an instance of memoization: a set of inputs and an
+output value.
+
+We could, in fact, approach the entire problem using only memoization. Each
+function cell in our dependency graph would correspond to an instance of
+memoization -- a particular function invoked with a particular set of
+inputs.  Each update would involve re-evaluating the "main" function of the
+program.  When no inputs are changed, all of the memoized calls will simply
+return their previously-computed results.
+
+This approach falls short of the ideal in the following ways:
+
+ * Dependencies are not tracked.  The dependencies of each cell must be
+   specified up-front as arguments.  hey cannot be "observed" as the program
+   function is evaluated.
+
+ * The lifetimes of cells are not tracked.
+
+ * Code must be structured so that functions -- not arbitrary expressions --
+   correspond to function cells.
+
+ * Without being able to test functions for equality, we cannot memoize the
+   results of higher order functions.
+
+ * Each update will visit every "cell", even if nothing has changed.
+
+Dynamic dependency tracking turns out to be important.  Consider, for
+example, invoking a C compiler.  When processing a source file, the compiler
+will encounter the names of other source files to load and process, so we
+cannot simply write `cc(readFile("foo.c"))`.  We could perform dependency
+scanning separately, and pass the result of that to the compiler, writing
+`cc(readFile("foo.c"), ccScan(readFile("foo.c")))`, but we run into the
+problem that `ccScan` will *also* have dependencies we have not explicitly
+passed as parameters.
+
+   Alternatively, we could pass the "file system" (a function that
+   encapsulates the capability of calling the file system) to `cc`.
+   However, even if we could implement a form of memoization that would
+   properly deal with this, it would make the `cc` result dependent on all
+   changes to the file system, so all `cc` results would be invalidated on a
+   regular basis.
+
+Cell lifetime management is important for recovering resources so that they
+do not accumulate indefinitely.  Memoization results could eventually
+exhaust memory.  Inputs require (OS) resources for detecting changes that
+require updates -- e.g. file modifications.
+
+   One could build an infrastructure for grouping memoization results by
+   update cycle and recovering them.  In a pure functional language -- at
+   least the conventional ones -- this would be quite intrusive on the
+   program.
+
+
+
+
+   # Modes of Evaluation
+     - Parallel
+     - Batch
+
+   "live" = "activated" by an activated cell in the graph.  `use` activates
+   a cell.  Construction activates parallel and batch cells.
+
+## Update Algorithm
+
+
+     - Requirements (Consistency, Minimality)
+
+       - Consistency: After an update, the dependency graph and its result
+         is consistent with the values of the inputs during that update.  In
+         other words, the result of each cell matches what would result from
+         evaluating "from scratch" with the same input values.
+
+       - Minimality: Update will *not* evaulate any cells whose inputs have
+         not changed, or any cells that do not remain in the resulting
+         graph, and it will not evaluate any cell more than once.
+
+     - Activation vs. Dependency (Parallel & Batch?)
+     -

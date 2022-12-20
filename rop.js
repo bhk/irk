@@ -266,7 +266,7 @@ class Agent {
             this.sendQueue.push(msg);
         } else {
             // TODO: re-establish connection
-            throw new Error(`send in bad state: ${this.ws.readyState}`);
+            this.shutdown(`send in bad state: ${this.ws.readyState}`);
         }
     }
 
