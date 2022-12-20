@@ -50,10 +50,9 @@ API
       - Strings.  Substrings matching `#{NAME}` will be replaced with the
         value of `E.cssName("NAME")`.
 
-      - Numbers.  These are converted to strings and suffixed with "px".
-        Note: in those rare cases where dimensionless numbers are used in
-        CSS, a string must be provided as a value.  For example: {zIndex:
-        "1"}.
+      - Numbers.  These are converted to strings and suffixed with "px".  To
+        convey other units or dimensionless numbers, use a string.  For
+        example: `{zIndex: "1"}`.
 
     Selector patterns allow declaration of more specific CSS rules via
     compound selectors.  Each `?` character will be replaced with the

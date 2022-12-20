@@ -132,7 +132,7 @@ const remote = (name) =>
     flushEQ(cell, [true, "a"]);
     eq(ca.observers.countUsed, 1);
     eq(sa.updaters[0] == null, false);
-    eq(serverState1.parents.size, 1);
+    eq(serverState1.outputs.size, 1);
 
     // ASSERT: update propagates
     serverState1.set(7);
@@ -154,7 +154,7 @@ const remote = (name) =>
     serverState1.set("ok");
     cell.deactivate();
     flushEvents();
-    eq(serverState1.parents.size, 0);
+    eq(serverState1.outputs.size, 0);
     eq(ca.observers.countUsed, 0);
     eq(sa.updaters[0], null);
 }

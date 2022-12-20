@@ -25,7 +25,7 @@ eq(ff, use(defer(_ => ff)));
 
 // test Cell, newState, newCell, onDrop
 
-let rootChildrenSize = (root.children ? root.children.size : 0);
+let rootInputsSize = (root.inputs ? root.inputs.size : 0);
 {
     //  a <- b c d
     //  b <- c x
@@ -88,7 +88,7 @@ let rootChildrenSize = (root.children ? root.children.size : 0);
     a.deactivate();
     events = "B";
 
-    eq(root.children.size, rootChildrenSize);
+    eq(root.inputs.size, rootInputsSize);
 }
 
 // wrap
@@ -102,7 +102,7 @@ let rootChildrenSize = (root.children ? root.children.size : 0);
     eq(w(1, 2), use(w.cell(1,2)))
     eq(w(1,2), 3);
     w.cell(1,2).deactivate();
-    eq(root.children.size, rootChildrenSize);
+    eq(root.inputs.size, rootInputsSize);
 }
 
 // activate

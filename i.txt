@@ -1,292 +1,197 @@
-Incremental.js
-####
-
-    Objective: Create a system that enables construction of UIs and other
-    programs as a function of external state at any point in time.  The
-    system deals with changes in external state efficiently, so that the
-    entire program does not need to be re-evaluated on every change.  This
-    frees the programmer from the need to write code for change propagation
-    (cf. usage of the "listener" model in UIs: modification of data
-    structures consistent with initial construction, registration for
-    notifications, and de-registration).  It also enables a more intuitive
-    way of dealing with I/O in a pure functional language.
-
-    Related/involved concepts: build systems, memoization, reactive
-    programming, incremental algorithms.
-
-
-Concept Outline
-===============
-
-  - A functional description, re-evaluated over time, is an alternative to
-    the "listener" model common in UI code, and more generally to various
-    programming paradigms involving registration, deregistration, and
-    customer handlers for different kinds of run-time state changes.  When
-    we refer to *time-changing* values or inputs, we mean values that differ
-    from one evaluation to the next; we assume they do not change during a
-    single evaluation.
-
-  - Input Logging: During execution of our program, a "runtime" (library or
-    VM) can monitor accesses to time-changing values, for two purposes.  (1)
-    The runtime can log the input operations and the values they returned.
-    Prior to re-evaluation, it can re-examine the time-changing values and
-    compare them to their values in the previous cycle.  If they have not
-    changed, the re-evaluation can be skipped.  (2) The runtime can register
-    for notification of changes to the accessed variables, so that it can
-    know when the program needs to be re-evaluated.
-
-  - Compartmentalization: We can separate our program into different
-    independently re-computable "processing nodes", similar to how a build
-    system breaks a build operation into distinct rules.  Input logging is
-    per-node, and dependencies between nodes are entailed in function
-    arguments and return values.
-
-  - Memoization: With a pure function, the same arguments always produce the
-    same result.  For these functions, we can cache the results and
-    short-cirtuit re-evaluation.
-
-    When a function is not pure, (it accesses time-changing values) it is
-    still pure within the context of a single evaluation, so memoization
-    remains valid for the scope of a single evaluation.  Furthermore, with
-    input logging, we can determine whether the cached result remains valid
-    in a subsequent cycle.
-
-  - Liveness:  We need to cancel registrations for changes when, after
-    recalculation, the values in question are no longer being accessed by
-    the program.  A dependency is "live" when it is being accessed by the
-    most recent evaluation.
-
-  - Non-blocking input: The notion of time-changing state can be applied to
-    long-lived IO operations, allowing an incremental program to deal with
-    I/O very easily.
+# i.js
 
-  - Conduits: We can generalize I/O as *conduits*: objects that encapsulate
-    state.  The conduit may remain unchanging while the value within it
-    changes.  Retrieval of the value inside a conduit is logged as a
-    dependency.
+`i.js` is a library that enables constructing a JavaScript-hosted analog of
+an [incremental reactive functional programming model](./incremental.md).
 
-  - External code: Code that is not executed during our functional
-    description is called external code.  This code may be invoked as
-    listeners or as callbacks.  Only "external" code may modify state.
-    One goal I have in mind is minimizing or eliminating "external" code.
+TODO...
 
+Cells must be pure functions of inputs.
+ * Equivalence
+ * Memoization
 
-Notes
-====
+Thunks (another Rio language feature -> JS)
+ - allow dependencies to be abstracted.  Constructing a thunk
+   does not incur the dependency; using it does.
 
+Reactive vs. Imperative Context
 
-### Summary
+  JS code is either executing inside the context of a "current cell" or not.
+  Execution in a cell context is driven by a graph update algorithm that
+  re-evaluates affected cells in the proper order to ensure minimal and
+  consistent updates.  While cells are executed, their use of other cells
+  is observed and tracked.
 
-   [Using new terminology]
-      * Memoization calls introduce cell boundaries.
-         - If the result does not change, re-eval doesn't propagate up.
-         - If the inputs don't change, re-eval doesn't propagate down.
-      * Invalidation identifies cells that may have changed.
-      * Input logging identifies when inputs *have* change.
+  Reactive code:
+    - construct cells
+    - use cells
+    - remain pure; do NOT affect other cells, except via results
 
+  Imperative code:
+    - construct root
+    - perform update
 
-    Invalidation limits re-evaluation to when it is required.  Input logging
-    limits re-evaluation to the set of inputs that matter.  Memoization and
-    compartmentalization limit re-evaluation to sub-regions of the data-flow
-    graph: compartmentalization stops re-evaluation propagating downstream;
-    memoization stops it from propagating upstream.
+  Bridging:
+    - construct input cells
+    - modify state cells
+    - construct side effect cells
 
 
-### Memoization
+## Patterns
 
+### Constructing Cells
 
-    Our JavaScript library uses strict equality when comparing functions and
-    function arguments.  As a result, developers must take care not to
-    "sneak" values across node boundaries, or else results will fail to be
-    consistent with that of a full re-evaluation.  This can happen in two
-    ways:
+The `wrap` function transforms a function to a cell constructor.  For
+example, consider this eagerly-evaluated expression and its cell equivalent:
 
-    1. Captured variables (or globals).
-    2. Values contained within aggregates (arrays, objects, etc.).
+    f(x, y, z)           --> eager
+    wrap(f)(x, y, z)     --> cell
 
-    For example:
+The argument to `wrap` must be a constant function with no variable
+captures.  See [Using Function Values With
+Cells](#using-function-values-with-cells), below, for more details.
 
-    . BAD:   function parent() {
-    .           let localVar = 1;
-    .           memo(() => { localVar = state.get() });
-    .           return localVar;
-    .       }
 
-    The first split function logs a dependency on `state`, but its return
-    value will not change, so `parent` will not be invalidated by a change
-    to `state`.  As a result, changes to `state` might not be reflected in
-    the return value of `parent` during re-evaluation.
+### Using Cells
 
-    And with aggregates:
+The `use(x)` resolves cells to their resulting value.  Non-cell values are
+returned as-is.
 
-    . BAD:   function parent() {
-    .           memo((o) => o.result = Math.floor(state()))({});
-    .           return o.result;
-    .        }
+    x = I.wrap(f)(7)
+    y = f(9)
+    z = I.use(x) + I.use(y)     // use(y) === y;  use(x) evaluates x
 
-    Here, changes to `state` will invalidate the sub-node and re-evaluate
-    it, but its return value will remain unchanged, and so the caller will
-    not be invalidated.
+The `useError` function be used to directly examine the error state of a
+cell without re-throwing it.
 
-    The problem with captured varaibles can be narrowed down to cases
-    wherein a nested function modifies a variable that is later read by an
-    outer function, a sibling function (nesting-wise), or sibling of an
-    ancestor (nesting-wise).  [Modifications done by an outer function can
-    only happen when the outer function is re-evaluated, which means that
-    new instances of the inner functions will get created, which defeats
-    memoization and results in fresh evaluations of the nested functions,
-    which will see the new value.]
 
-    . OK:   function parent() {
-    .          let localVar = state.get();
-    .          f = () => localVar;
-    .          return memo(f)();
-    .       }
+## Imperative Code
 
-    Here, modification of `state` will make the sub-node -- `memo(f)()` --
-    invalid, but that will also trigger re-evaluation of `f` which will
-    replace the sub-node with a new sub-node.
+Some code must bridge the gap between the reactive world and the imperative
+world, which directly works with mutation and I/O.
 
-    Similarly, we do not have to worry about aggregates initialized by the
-    function that constructs them.
 
-    OK:   memo(f)([localVar]);
+### State Cells
 
-    OK:   memo(f)({x: localVar});
+`newState(initialValue)` constructs a state cell.
 
-    OK:   memo(() => [Math.floor(getState())])();
+`cell.set(newValue)` can be used to modify the value of a state cell.  This
+can be called outside of the reactive comain (that is: outside of the scope
+of a cell recalc).
 
+If `set` is called during an update cycle -- while another cell is being
+recalculated -- this will be detected and a fatal error will be thrown.
 
-### Conduits
 
-    Conduits provide better encapsulation of changes.  A conduit allows any
-    node to pass a changing value to another node in the graph without
-    invalidating any of the nodes in between.
+### Side Effect Cells
 
-    Node A:    conduit = memo(() => Math.floor(state()));
-    Node B:    x = conduit();
+TBD
 
-    Unless node A itself is re-evaluated, the conduit will remain constant
-    while `state` changes.
 
+### JavaScript Root Context
 
-#### Compartmentalization
+When JavaScript begins execution, and when JavaScript callbacks fire, code
+is executing outside of the context of any cell's update() method.  Here we
+define how the library's functions behave in this outermost "root" context.
 
-  <imagine: detailed data flow graph>
+We create a cell called the root cell and treat it as the current cell when
+code is executing in the root context.  The root cell is self-updating,
+using `setTimeout` to trigger its own updates asynchronously whenever it is
+marked dirty.
 
-    Program evaluation (execution) can be represented as a DAG of data flow.
-    This is not the AST, but the history of execution.  (It follows the AST
-    in places, but functions are expanded where they are called, and it
-    diverges where conditionals or lazy evaulation are involved.)  In our
-    model, some of the leaves are external inputs that may change from one
-    evaluation to the next.
+When any cell is used in the root context, it becomes a dependency of the
+root cell, and thereby is *activated* -- that is, it will be automatically
+updated if it become dirty.  If any of these cells enter an error state, the
+error will be reported, which will terminated program execution in a
+command-line environment.  Likewise, when `use()` is called in the root
+context, cell errors will not be caught.
 
-    We might like to optimize re-evaluation at this level, but this will
-    probably be terribly inefficient.
+Cleanup functions that are registered with `onDrop(f)` in the root context
+will generally not ever be called.  This is appropriate for resources that
+have the lifetime of the entire program.
 
-  <imagine: DAG nodes grouped into a super-nodes>
 
-    Instead, we provide a primitive called `memo` that allows the
-    programmer to specify where "bulkheads" can be placed to partition
-    the nodes into separately evaluable sub-graphs.
+## Equivalence
 
-  <imagine: super-nodes labeled "?">
+The library must perform equivalence tests on (a) cell results, and (b)
+inputs to memoized functions (including cell construction parameters).
 
-    The incremental evaluation framework does not have visibility into the
-    nodes.  At each "split" point, it just knows the function, what was
-    passed to it, and what was returned from it.
+We need to ensure that our functions, including cells, are pure functions,
+and will return the same value every time they operate on the same inputs.
+The challenge is that JavaScript compares composite values like objects and
+arrays by *identity*.  This is appropriate when these values are mutable,
+but as a result, a function that constructs a composite value will always
+return *different* values each time it is called.
 
-  <downstream>
 
-    The easiest thing to accomplish is to contain the effects of changes
-    within the subexpression that do not affect the caller.  We can
-    re-evaluate the subexpression, and then if its return value does not
-    change, we can
+### Interning
 
-       Alt text: We can avoid re-evaluating the parent when a child node is
-       re-evaluated.  To do this, we need to record the value it previously
-       returned to the parent, and ensure that the new result does not
-       differ.
+Our solution is to automatically **intern** cell results and cell
+construction parameters. Interning converts an input value to a equivalent
+canonical value unique for that equivalence class.  That is, `intern(a) ===
+intern(b)` if and only if `a` and `b` are equivalent, where "equivalent" is
+defined in terms of the contents of the value, not its identity.
 
-  <upstream>
+For good measure, interning of arrays and simple objects (those whose
+constructor is `Object`) yields an immutable (frozen) instance.
 
-    One complication to keep in mind is that evaluation might follow a
-    different path on a subsequent evlauation, so the DAG will not look the
-    same.  When a parent node is evaluated, how do we know when to associate
-    a `memo` with one that was created in a prior evaluation phase?
-    Memoization.
+Interning an inherently immutable value (e.g. string, number, boolean, null)
+is trivial: the result is the same as the input.
 
-       Alt text: We can avoid re-evaluating a child node when a parent node
-       is re-evaluated.  This requires identifying a pre-existing node that
-       matches the node being created by the parent as it executes.  For
-       identification, we use memoization, so the function and argument
-       values must match thoes of a node from the previous cycle.
+Functions and complex objects (those with user-defined constructors) are not
+internable, so `intern(v) === v` in these cases.  Developers must take
+particular care using these values with cells.
 
-    Memoization could be skipped in cases where downstream firewalling is
-    desired and upstream firewalling is impossible.  For example, whenever
-    the function or one of its args is created during evaluation of the
-    parent, memoization will always fail.
 
-    Memoization *must* take time-changing inputs into account.  Inputs are
-    logged as the function executes, and when a matching node is found, the
-    previous result is *validated*.  Validating a previous result requires
-    re-validating all inputs.
+### Using Function Values With Cells
 
-       Define:  Eᵢ = value of expression E at cycle i
+The onus is on the developer to avoid using "non-constant" functions with
+cells -- that is, in a cell construction parameter or cell result.  Some
+common caveats with [Construcing Cells](#constructing-cells) are discussed
+above.  Similar concerns apply to cell results, and some additional
+elaboration is warranted.  To be a "constant" function...
 
-       Given:
-           x = memoize(f)(...a)
-           I = input operations performed while evaluating f(...a) and the
-               corresponding results -- [...(o, r)].
+ - It must take on the same value in each recalculation -- that is, it
+   cannot be the result of a JavaScript "function expression" --
+   e.g. `function (x) { return x*2;}` or `x => x*2` -- that is evaluated
+   during cell recalculation.
 
-       We know:
-           x₀=x₁  ⇐  f₀=f₁ and a₀=a₁ and I₀=I₁
-           Mᵢ = (fᵢ, aᵢ) → (xᵢ, Iᵢ).
+ - It must not have any captures that change value over time.
 
-       We store (x,I) in M, indexed by (f,a), and then re-validate `I`
-       on a cache hit.  "Valid" means: ∀(o,r) ∈ I: o() = r.
+ - It must not have any captures that refer to mutable values, or to
+   non-constant functions.
 
+The following examples show a non-constant function being used to construct
+a cell.  This will result in a cell that computes the correct value, but
+whose results will not be reused if this expression is re-evaluated:
 
-### I/O Logging
+    f(x, 7) + y                       --> eager
+    wrap(() => f(x,7) + y)()          --> BAD cell
+    wrap((a,b) => f(a,7) + b)(x, y)   --> BAD cell
 
-    We need to ensure that I/O state does not change during recalculation;
-    otherwise we would have an invalid state.
+The proper approach here is to extract the logic to a constant function:
 
-    Idempotent writes (once ~= many)?
+    function expr01(a, b) {
+      return f(a, 7) + b;
+    }
 
-       Idempotency would have to apply program-wide.  One node setting "x=1"
-       would conflict with another node setting "x=2".
+    wrap(expr01)(x, y)             --> cell
 
-       Current memoization scheme conflicts, because non-dirty nodes will
-       not be visited and re-asserted (requiring "never ~= once", rather
-       "once ~= many").  Any writes would have to be visited on EVERY update
-       phase (unless we can listen for changes).
+The same problem arises when attempting to use methods.  The following
+attempts generate new closures every time the expression is evaluated,
+defeating cell reuse:
 
+    obj.method(v)                  --> eager
+    wrap(x => obj.method(x))(v)    --> BAD cell
+    wrap(obj.method.bind(obj))(v)  --> BAD cell
 
-### Conduits
+One solution is to re-define the method when an object is constructed:
 
-    Conduits may not be modified during eval time, except at creation.  A
-    "wrap" operation allows the creator of a conduit to specify a function
-    that computes its value (right now, and in future recalculations).
+    this.m1 = this.m1.bind(this);
+        obj.m1(v)                  -->  eager
+        wrap(obj.m1)(v)            -->  cell
 
-    A "newState" constructor returns a getter and setter, but the programmer
-    must take care to avoid modifying it during evaluation; it may be
-    modified only during event handlers.
+    this.m2 = wrap(this.m2.bind(this));
+        obj.m2(v)                  -->  cell
 
-
-### Non-blocking Input
-
-    Non-blocking, incremental I/O primitives allow an incremental program to
-    deal with I/O very easily.  They resemble synchronous blocking
-    operations, but on return they may indicate an In-Progress condition, in
-    addition to Complete or Error.
-
-    In UI, it is important to properly reporting such states is important,
-    and this model makes that information readily available.
-
-    Other approaches to ensuring a responsive UI while long-lived I/O
-    operations are asynchronous callback-based APIs, and multi-threaded
-    programming using shared state and synchronization primitives.  These
-    incur complexities similar to those of the UI listener model
-    (registration, de-registration, error handling), as well as other
-    headaches.
+Of course, if the object itself is created every time a cell is
+recalculated, then that is also a problem.

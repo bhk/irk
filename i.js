@@ -163,21 +163,21 @@ const isThunk = (value) => {
 // Cell
 //------------------------------------------------------------------------
 //
-// A `Cell` describes a node in a dependency graph.  Cells may have children
-// (other cells on whose results they depend) and parents (cells that depend
-// on their results).  "Function cells" act as parents and children.  "State
-// cells" are only children.  "Root cells" are only parents.
+// A `Cell` describes a node in a dependency graph.  Cells may have inputs
+// (cells they have used) and outputs (cells that use them).  "Function
+// cells" may use other cells and be used.  "State cells" do not use other
+// cells.  "Root cells" are not used by other cells.
 //
-// All cells implement implement the "child cell" interface:
+// All cells implement implement the "used cell" interface:
 //    update()
 //    get()
-//    addParent()
-//    removeParent()
+//    addOutput()
+//    removeOutput()
 //
-// Cells that depend on other cells implement the "parent cell" interface:
+// Cells that depend on other cells implement the "using cell" interface:
 //    setDirty()
-//    addChild(cell, result)
-//    removeChild()
+//    addInput(cell, result)
+//    removeInput()
 //
 
 class Cell extends Thunk {
@@ -185,24 +185,24 @@ class Cell extends Thunk {
         super();
         this.isDirty = isDirty;
         this.result = value;
-        this.parents = new Set();
+        this.outputs = new Set();
     }
 
     setDirty() {
         if (!this.isDirty) {
             this.isDirty = true;
-            for (const p of this.parents) {
+            for (const p of this.outputs) {
                 p.setDirty();
             }
         }
     }
 
-    addParent(p) {
-        this.parents.add(p);
+    addOutput(p) {
+        this.outputs.add(p);
     }
 
-    removeParent(p) {
-        this.parents.delete(p);
+    removeOutput(p) {
+        this.outputs.delete(p);
     }
 }
 
@@ -210,7 +210,7 @@ class Cell extends Thunk {
 // StateCell
 //------------------------------------------------------------------------
 //
-// StateCell implements the "child cell" interface.
+// StateCell implements the "used cell" interface.
 //
 
 class StateCell extends Cell {
@@ -237,7 +237,7 @@ class StateCell extends Cell {
 
     get() {
         const result = this.update();
-        currentCell.addChild(this, result);
+        currentCell.addInput(this, result);
         return result;
     }
 }
@@ -258,14 +258,14 @@ class FunCell extends Cell {
     constructor(f, args, key) {
         // isDirty is tri-state:
         //   false => result is valid
-        //   true => may need recalc (validate children)
+        //   true => may need recalc (validate inputs)
         //   "new" => needs recalc (has never been evaluated)
         super(null, "new");
 
         this.f = f;              // const
         this.args = args;        // const
         this.key = key;          // const
-        this.children = null;
+        this.inputs = null;
         this.cleanups = null;
         this.result = null;
     }
@@ -277,32 +277,32 @@ class FunCell extends Cell {
         const result = this.update();
         // If, after evaluation, we have no resources to clean up and we
         // weren't memoized, then we don't need to track this dependency.
-        if (this.children || this.cleanups || this.key) {
-            currentCell.addChild(this, result);
+        if (this.inputs || this.cleanups || this.key) {
+            currentCell.addInput(this, result);
         }
         return result;
     }
 
-    // Called after our parent has removed us...
-    removeParent(p) {
-        this.parents.delete(p);
-        if (this.parents.size == 0) {
+    // Called after our output has removed us...
+    removeOutput(p) {
+        this.outputs.delete(p);
+        if (this.outputs.size == 0) {
             this.drop();
         }
     }
 
-    // add/removeChild(c) call c.add/removeParent()
-    addChild(child, value) {
-        if (this.children == null) {
-            this.children = new Map();
+    // add/removeInput(c) call c.add/removeOutput()
+    addInput(input, value) {
+        if (this.inputs == null) {
+            this.inputs = new Map();
         }
-        this.children.set(child, value);
-        child.addParent(this);
+        this.inputs.set(input, value);
+        input.addOutput(this);
     }
 
-    removeChild(child) {
-        this.children.delete(child);
-        child.removeParent(this);
+    removeInput(input) {
+        this.inputs.delete(input);
+        input.removeOutput(this);
     }
 
     // Call all registered `onDrop` functions.
@@ -327,7 +327,7 @@ class FunCell extends Cell {
         this.cleanups.push(cbk);
     }
 
-    // Discard result, call onDrop handlers, disown children.
+    // Discard result, call onDrop handlers, detach from inputs.
     // Called when this is no longer "live".
     //
     drop() {
@@ -338,19 +338,19 @@ class FunCell extends Cell {
             cellCache.delete(this.key);
         }
 
-        // detach from children
-        if (this.children != null) {
-            for (const [child, result] of this.children) {
-                child.removeParent(this);
+        // detach from inputs
+        if (this.inputs != null) {
+            for (const [input, result] of this.inputs) {
+                input.removeOutput(this);
             }
-            this.children = null;
+            this.inputs = null;
         }
     }
 
-    // Remove cell from all parents.  This indirectly triggers this.drop().
+    // Remove cell from all outputs.  This indirectly triggers this.drop().
     deactivate() {
-        for (const parent of [...this.parents]) {
-            parent.removeChild(this);
+        for (const output of [...this.outputs]) {
+            output.removeInput(this);
         }
     }
 
@@ -365,10 +365,10 @@ class FunCell extends Cell {
         if (this.isDirty == "new") {
             // node has not been calculated
             isInvalid = true;
-        } else if (this.children) {
+        } else if (this.inputs) {
             // Validate cells in the order they were first evaluated,
             // to avoid recalculating un-live cells.
-            for (const [cell, result] of this.children) {
+            for (const [cell, result] of this.inputs) {
                 const value = cell.update();
                 if (result !== value) {
                     isInvalid = true;
@@ -385,13 +385,13 @@ class FunCell extends Cell {
         return this.result;
     }
 
-    // Call f(args), watching for creation of child cells
+    // Call f(args), watching for use of input cells
     //
     recalc() {
         this.cleanup();
 
-        const oldChildren = this.children;
-        this.children = null;
+        const oldInputs = this.inputs;
+        this.inputs = null;
 
         const saveCurrentCell = currentCell;
         currentCell = this;
@@ -402,13 +402,13 @@ class FunCell extends Cell {
         }
         currentCell = saveCurrentCell;
 
-        if (oldChildren != null) {
-            // A cell cannot transition from some children to *none*
+        if (oldInputs != null) {
+            // A cell cannot transition from some inputs to *none*
             // unless there is an untracked dependency.
-            assert(this.children);
-            for (const [child, value] of oldChildren) {
-                if (!this.children.has(child)) {
-                    child.removeParent(this);
+            assert(this.inputs);
+            for (const [input, value] of oldInputs) {
+                if (!this.inputs.has(input)) {
+                    input.removeOutput(this);
                 }
             }
         }
@@ -427,35 +427,35 @@ const findCell = (f, args) => {
 // RootCell
 //----------------------------------------------------------------
 
-// A RootCell has no parents and is self-updating.
+// A RootCell has no outputs and is self-updating.
 //
 class RootCell extends FunCell {
     constructor() {
         // `f` and `args` are never referenced in RootCell
         super();
         this.isDirty = false;
-        // this fake parent exists only to trigger updates
-        this.addParent({
+        // this fake output exists only to trigger updates
+        this.addOutput({
             setDirty: () => setTimeout(_ => use(this))
         });
     }
 
-    // override get() to not add any parents
+    // override get() to not add any outputs
     get() {
         return this.update();
     }
 
-    // preserve children and update them; don't call onDrops
+    // preserve inputs and update them; don't call onDrops
     recalc() {
-        if (this.children) {
-            for (const [child, _] of this.children) {
-                use(child);
+        if (this.inputs) {
+            for (const [input, _] of this.inputs) {
+                use(input);
             }
         }
     }
 };
 
-// The globalRoot cell acts as parent for all cell evaluations that occur
+// The globalRoot cell acts as output for all cell evaluations that occur
 // outside of the scope of another cell's update.
 const globalRoot = new RootCell();
 currentCell = globalRoot;
@@ -671,14 +671,14 @@ const valueText = (v) => {
     return rr(0)(v);
 };
 
-const showTree = (start, getChildren, getText, logger) => {
+const showTree = (start, getInputs, getText, logger) => {
     const recur = (node, prefix1, prefix) => {
         getText(node).forEach((line, num) => {
             logger((num==0 ? prefix1 : prefix) + line);
         });
-        const a = [...getChildren(node)];
-        a.forEach( (child, ndx) => {
-            recur(child,
+        const a = [...getInputs(node)];
+        a.forEach( (input, ndx) => {
+            recur(input,
                   prefix + " + ",
                   prefix + (ndx + 1 == a.length ? "   " : " | "));
         });
@@ -709,7 +709,7 @@ const logCell = (root, options) => {
     };
 
     showTree(root,
-             c => (c.children ?? []).keys(),
+             c => (c.inputs ?? []).keys(),
              getCellText,
              options.log || log);
 };
